@@ -130,6 +130,20 @@ class LabelGeometry:
 
 
 @dataclass(frozen=True)
+class GratingMetadata:
+    base_pitch_mm: float
+    effective_pitch_mm: float
+    open_slot_width_mm: float
+    opaque_bar_width_mm: float
+    open_fraction: float
+    density: float
+    reference_wavelength_nm: float
+    first_order_angle_rad: float
+    first_order_sensor_offset_mm: float
+    pitch_selection_source: str
+
+
+@dataclass(frozen=True)
 class MaskGeometry:
     profile_slug: str
     mask_type: MaskType
@@ -141,10 +155,11 @@ class MaskGeometry:
     thickness_mm: float
     pattern_border_mm: float
     label: LabelGeometry | None
+    grating: GratingMetadata | None
     test_ring: bool = False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class GenerationRequest:
     profile: LensProfile
     mask_type: MaskType
@@ -155,6 +170,9 @@ class GenerationRequest:
     clearance_mm: float
     pattern_border_mm: float
     label: bool
+    slot_width_mm: float | None
+    slot_spacing_mm: float | None
+    slot_density: float
     output_dir: Path
     openscad: str
     dry_run: bool = False

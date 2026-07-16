@@ -3,7 +3,7 @@ from pathlib import Path
 from selflensbahtinov.algorithms import AlgorithmOptions, calculate_mask
 from selflensbahtinov.models import GenerationRequest, OutputFormat
 from selflensbahtinov.openscad import (
-    OpenScadError,
+    UnsupportedFormatError,
     command_for,
     export,
     output_path,
@@ -25,14 +25,17 @@ def geometry_for(req: GenerationRequest, test_ring: bool = False):
     return calculate_mask(
         req.profile,
         AlgorithmOptions(
-            req.mask_type,
-            req.mount_type,
-            req.focal_length_mm,
-            req.aperture_f_number,
-            req.clearance_mm,
-            req.pattern_border_mm,
-            req.label,
-            test_ring,
+            mask_type=req.mask_type,
+            mount_type=req.mount_type,
+            focal_length_mm=req.focal_length_mm,
+            aperture_f_number=req.aperture_f_number,
+            clearance_mm=req.clearance_mm,
+            pattern_border_mm=req.pattern_border_mm,
+            label=req.label,
+            test_ring=test_ring,
+            slot_width_mm=req.slot_width_mm,
+            slot_spacing_mm=req.slot_spacing_mm,
+            slot_density=req.slot_density,
         ),
     )
 
@@ -55,7 +58,7 @@ def generate(req: GenerationRequest, *, test_ring: bool = False) -> list[Path]:
         if fmt is OutputFormat.SCAD:
             continue
         if not req.dry_run and not supports_format(req.openscad, fmt):
-            raise OpenScadError(
+            raise UnsupportedFormatError(
                 f"Installed OpenSCAD cannot export {fmt.value}; update OpenSCAD or request SCAD/STL only"
             )
         out = output_path(base, fmt)
