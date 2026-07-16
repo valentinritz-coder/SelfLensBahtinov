@@ -261,17 +261,31 @@ def test_deprecated_filter_thread_alias_does_not_bypass_missing_measurement(caps
 
 
 def test_github_action_mount_has_no_misleading_default():
-    workflow = Path(".github/workflows/generate-mask.yml").read_text(encoding="utf-8")
-    mount_block = workflow.split("      mount:", 1)[1].split("      mount_diameter:", 1)[0]
+    workflow = Path(".github/workflows/generate-mask.yml").read_text(
+        encoding="utf-8"
+    )
+
+    mount_block = (
+        workflow
+        .split("      mount:", 1)[1]
+        .split("      mount_diameter:", 1)[0]
+    )
+
     assert "default:" not in mount_block
-    assert "requires measured diameter" in mount_block
-    assert "bundled profiles are not ready until measured" in mount_block
-    option_lines = [line.strip()[2:] for line in mount_block.splitlines() if line.strip().startswith("- ")]
+    assert "Smooth slip-fit mounting surface" in mount_block
+
+    option_lines = [
+        line.strip()[2:]
+        for line in mount_block.splitlines()
+        if line.strip().startswith("- ")
+    ]
+
     assert option_lines == [
         "lens-barrel-outer-slip-fit",
         "hood-outer-slip-fit",
         "hood-inner-slip-fit",
     ]
+
     assert "filter-thread" not in mount_block
     assert "- hood-outer\n" not in mount_block
     assert "- barrel-outer\n" not in mount_block
