@@ -1,18 +1,28 @@
 {
+  "schema_version": 1,
   "manufacturer": "Fujifilm",
   "model": "Fujinon XF100-400mmF4.5-5.6 R LM OIS WR",
   "slug": "fujifilm-xf100-400",
-  "filter_thread_mm": 77.0,
-  "focal_length_min_mm": 100.0,
-  "focal_length_max_mm": 400.0,
-  "aperture_min": 4.5,
-  "aperture_max": 5.6,
-  "hood_outer_diameter_mm": null,
-  "barrel_outer_diameter_mm": null,
-  "mount_type": "filter_thread",
-  "fit_clearance_mm": 0.35,
-  "mask_thickness_mm": 2.0,
-  "ring_depth_mm": 8.0,
-  "label": "XF100-400 77mm",
-  "notes": "TODO: Measure hood_outer_diameter_mm and barrel_outer_diameter_mm before using hood_outer or barrel_outer mounting. Filter thread is known to be 77 mm."
+  "focal_length": { "min_mm": 100.0, "max_mm": 400.0 },
+  "aperture": { "min_f_number": 4.5, "max_f_number": 5.6 },
+  "mounting": {
+    "filter_thread_mm": 77.0,
+    "hood_outer_diameter_mm": null,
+    "hood_inner_diameter_mm": null,
+    "barrel_outer_diameter_mm": null,
+    "recommended_mount": "filter_thread"
+  },
+  "recommended_focus": { "focal_length_mm": 400.0, "aperture_f_number": 5.6 },
+  "defaults": {
+    "mask_type": "bahtinov",
+    "mount_type": "filter_thread",
+    "fit_clearance_mm": 0.35,
+    "mask_thickness_mm": 2.0,
+    "ring_depth_mm": 8.0,
+    "ring_wall_thickness_mm": 3.0,
+    "pattern_border_mm": 3.0,
+    "engrave_label": true
+  },
+  "label": "XF100-400",
+  "notes": ["TODO: Measure hood outer and inner diameters.", "TODO: Measure barrel outer diameter.", "Filter-thread mode is a slip fit sized from the 77 mm nominal filter diameter, not a threaded mount."]
 }
