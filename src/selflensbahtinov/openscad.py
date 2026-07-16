@@ -13,6 +13,10 @@ class OpenScadError(RuntimeError):
     pass
 
 
+class UnsupportedFormatError(OpenScadError):
+    pass
+
+
 def command_for(openscad: str, scad_path: Path, output_path: Path) -> list[str]:
     return [openscad, "-o", str(output_path), str(scad_path)]
 

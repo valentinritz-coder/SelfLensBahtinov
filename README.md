@@ -71,6 +71,12 @@ Generate Bahtinov SCAD, STL, and 3MF:
 selflensbahtinov generate fujifilm-xf100-400 --mask bahtinov --mount filter-thread --format scad --format stl --format 3mf
 ```
 
+Tune the physical grating if your printer or observing setup needs different diffraction spikes:
+
+```powershell
+selflensbahtinov generate fujifilm-xf100-400 --mask bahtinov --slot-spacing 5.0 --slot-width 1.2 --slot-density 1.5 --show-grating-info
+```
+
 Generate TriBahtinov outputs:
 
 ```powershell
@@ -99,7 +105,7 @@ The generation flow is:
 LensProfile -> generation options -> MaskAlgorithm -> MaskGeometry -> OpenScadRenderer -> SCAD / STL / 3MF
 ```
 
-The geometry model is deliberately small: `Point2D`, `SlotGeometry`, `RingGeometry`, `LabelGeometry`, and `MaskGeometry`. The clear aperture is the slip-fit inner diameter minus twice `pattern_border_mm`; focal length and f-number only tune the slot width/spacing heuristic.
+The geometry model is deliberately small: `Point2D`, `SlotGeometry`, `RingGeometry`, `LabelGeometry`, `GratingMetadata`, and `MaskGeometry`. The clear aperture is the slip-fit inner diameter minus twice `pattern_border_mm`. Python computes the Bahtinov transmission gratings from a Fraunhofer-equation, physics-informed printable heuristic; focal length and f-number choose the default grating pitch when explicit slot controls are not provided. Python produces candidate rectangles and optical metadata; OpenSCAD still performs circular and sector clipping. Unsupported 3MF export support causes a controlled SCAD/STL bundle fallback, while actual export failures remain errors. See `docs/bahtinov-algorithm.md` for the mathematical model and references.
 
 ## Measurements and test-ring workflow
 
