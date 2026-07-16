@@ -1,5 +1,5 @@
 from __future__ import annotations
-import argparse, logging
+import argparse, logging, sys
 from pathlib import Path
 from selflensbahtinov.generator import generate, geometry_for
 from selflensbahtinov.models import GenerationRequest, MaskType, MountType, OutputFormat
@@ -19,7 +19,15 @@ def _mask(v):
 
 
 def _mount(v):
-    return MountType(v.replace("-", "_"))
+    normalized = v.replace("-", "_")
+    if normalized == "filter_thread":
+        print(
+            "warning: --mount filter-thread is deprecated; using lens-barrel-outer-slip-fit. "
+            "This is a smooth slip fit only, not a threaded or screw-in mount.",
+            file=sys.stderr,
+        )
+        normalized = "lens_barrel_outer_slip_fit"
+    return MountType(normalized)
 
 
 def _fmt(v):
@@ -71,11 +79,29 @@ def parser():
     return p
 
 
+NO_MEASURED_MOUNT_MESSAGE = (
+    "No measured mounting method is available for this profile. "
+    "Measure lens_barrel_outer_mm, hood_outer_mm, or hood_inner_mm, "
+    "update the profile, and select the corresponding --mount option."
+)
+
+
+def _display_mount(mount):
+    return "none" if mount is None else mount.value.replace("_", "-")
+
+
+def _selected_mount(a, prof):
+    mount = a.mount or prof.defaults.mount_type or prof.mounting.recommended_mount
+    if mount is None:
+        raise ValueError(NO_MEASURED_MOUNT_MESSAGE)
+    return mount
+
+
 def _req(a, prof):
     return GenerationRequest(
         profile=prof,
         mask_type=a.mask or prof.defaults.mask_type,
-        mount_type=a.mount or prof.defaults.mount_type,
+        mount_type=_selected_mount(a, prof),
         formats=tuple(a.formats or [OutputFormat.SCAD]),
         focal_length_mm=(
             a.focal_length
@@ -118,7 +144,14 @@ def main(argv=None):
         prof = load_profile(resolve_profile(args.profile))
         if args.cmd == "show":
             print(
-                f"{prof.slug}: {prof.manufacturer} {prof.model}\nfilter-thread slip-fit diameter: {prof.mounting.filter_thread_mm} mm\nnotes: {'; '.join(prof.notes)}"
+                f"{prof.slug}: {prof.manufacturer} {prof.model}\n"
+                f"nominal filter-thread metadata: {prof.mounting.filter_thread_nominal_mm} mm (not a printable thread)\n"
+                f"lens barrel outer: {prof.mounting.lens_barrel_outer_mm} mm ({prof.mounting.lens_barrel_outer_status})\n"
+                f"hood outer: {prof.mounting.hood_outer_mm} mm ({prof.mounting.hood_outer_status})\n"
+                f"hood inner: {prof.mounting.hood_inner_mm} mm ({prof.mounting.hood_inner_status})\n"
+                f"recommended mount: {_display_mount(prof.mounting.recommended_mount)}\n"
+                f"default mount: {_display_mount(prof.defaults.mount_type)}\n"
+                f"notes: {'; '.join(prof.notes)}"
             )
             return 0
         if args.cmd == "validate":

@@ -1,21 +1,33 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "manufacturer": "Fujifilm",
   "model": "Fujinon XF16-80mmF4 R OIS WR",
   "slug": "fujifilm-xf16-80",
-  "focal_length": { "min_mm": 16.0, "max_mm": 80.0 },
-  "aperture": { "min_f_number": 4.0, "max_f_number": 4.0 },
-  "mounting": {
-    "filter_thread_mm": 72.0,
-    "hood_outer_diameter_mm": null,
-    "hood_inner_diameter_mm": null,
-    "barrel_outer_diameter_mm": null,
-    "recommended_mount": "filter_thread"
+  "focal_length": {
+    "min_mm": 16.0,
+    "max_mm": 80.0
   },
-  "recommended_focus": { "focal_length_mm": 80.0, "aperture_f_number": 4.0 },
+  "aperture": {
+    "min_f_number": 4.0,
+    "max_f_number": 4.0
+  },
+  "mounting": {
+    "filter_thread_nominal_mm": 72.0,
+    "lens_barrel_outer_mm": null,
+    "lens_barrel_outer_status": "unknown",
+    "hood_outer_mm": null,
+    "hood_outer_status": "unknown",
+    "hood_inner_mm": null,
+    "hood_inner_status": "unknown",
+    "recommended_mount": null
+  },
+  "recommended_focus": {
+    "focal_length_mm": 80.0,
+    "aperture_f_number": 4.0
+  },
   "defaults": {
     "mask_type": "bahtinov",
-    "mount_type": "filter_thread",
+    "mount_type": null,
     "fit_clearance_mm": 0.35,
     "mask_thickness_mm": 2.0,
     "ring_depth_mm": 8.0,
@@ -24,5 +36,10 @@
     "engrave_label": true
   },
   "label": "XF16-80",
-  "notes": ["TODO: Measure hood outer and inner diameters.", "TODO: Measure barrel outer diameter.", "Filter-thread mode is a slip fit sized from the 72 mm nominal filter diameter, not a threaded mount."]
+  "notes": [
+    "TODO: Physically measure hood outer diameter before generating a hood outer slip-fit mask.",
+    "TODO: Physically measure hood inner diameter if using hood inner slip fit.",
+    "TODO: Physically measure lens barrel outer diameter if using lens barrel outer slip fit.",
+    "Nominal filter-thread size is 72 mm metadata only; it is not used as a printable screw thread or assumed barrel/hood diameter."
+  ]
 }

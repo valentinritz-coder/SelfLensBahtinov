@@ -12,10 +12,9 @@ class MaskType(str, Enum):
 
 
 class MountType(str, Enum):
-    FILTER_DIAMETER_SLIP_FIT = "filter_thread"
-    HOOD_OUTER = "hood_outer"
-    BARREL_OUTER = "barrel_outer"
-    UNIVERSAL_SCREWS = "universal_screws"
+    LENS_BARREL_OUTER_SLIP_FIT = "lens_barrel_outer_slip_fit"
+    HOOD_OUTER_SLIP_FIT = "hood_outer_slip_fit"
+    HOOD_INNER_SLIP_FIT = "hood_inner_slip_fit"
 
 
 class OutputFormat(str, Enum):
@@ -38,11 +37,14 @@ class Aperture:
 
 @dataclass(frozen=True)
 class Mounting:
-    filter_thread_mm: float | None
-    hood_outer_diameter_mm: float | None
-    hood_inner_diameter_mm: float | None
-    barrel_outer_diameter_mm: float | None
-    recommended_mount: MountType
+    filter_thread_nominal_mm: float | None
+    lens_barrel_outer_mm: float | None
+    lens_barrel_outer_status: str
+    hood_outer_mm: float | None
+    hood_outer_status: str
+    hood_inner_mm: float | None
+    hood_inner_status: str
+    recommended_mount: MountType | None
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,7 @@ class RecommendedFocus:
 @dataclass(frozen=True)
 class ProfileDefaults:
     mask_type: MaskType
-    mount_type: MountType
+    mount_type: MountType | None
     fit_clearance_mm: float
     mask_thickness_mm: float
     ring_depth_mm: float
@@ -77,20 +79,30 @@ class LensProfile:
     label: str
     notes: tuple[str, ...]
 
-    def mount_diameter_mm(self, mount: MountType) -> float:
-        if mount is MountType.UNIVERSAL_SCREWS:
-            raise NotImplementedError(
-                "universal-screws mounting is planned but not implemented in V1"
-            )
-        value = {
-            MountType.FILTER_DIAMETER_SLIP_FIT: self.mounting.filter_thread_mm,
-            MountType.HOOD_OUTER: self.mounting.hood_outer_diameter_mm,
-            MountType.BARREL_OUTER: self.mounting.barrel_outer_diameter_mm,
+    def mount_measurement(self, mount: MountType) -> tuple[float, str]:
+        value, status = {
+            MountType.LENS_BARREL_OUTER_SLIP_FIT: (
+                self.mounting.lens_barrel_outer_mm,
+                self.mounting.lens_barrel_outer_status,
+            ),
+            MountType.HOOD_OUTER_SLIP_FIT: (
+                self.mounting.hood_outer_mm,
+                self.mounting.hood_outer_status,
+            ),
+            MountType.HOOD_INNER_SLIP_FIT: (
+                self.mounting.hood_inner_mm,
+                self.mounting.hood_inner_status,
+            ),
         }[mount]
         if value is None:
             raise ValueError(
-                f"{mount.value} requires a measured diameter in the profile"
+                f"{mount.value} requires a physically measured diameter in the profile; "
+                "the nominal filter-thread size is metadata only and is not a printable thread or barrel diameter"
             )
+        return value, status
+
+    def mount_diameter_mm(self, mount: MountType) -> float:
+        value, _status = self.mount_measurement(mount)
         return value
 
 
@@ -119,6 +131,10 @@ class RingGeometry:
     wall_thickness_mm: float
     depth_mm: float
     clearance_mm: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mount_type, MountType):
+            raise TypeError("RingGeometry.mount_type must be a concrete MountType")
 
 
 @dataclass(frozen=True)
@@ -176,3 +192,7 @@ class GenerationRequest:
     output_dir: Path
     openscad: str
     dry_run: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mount_type, MountType):
+            raise TypeError("GenerationRequest.mount_type must be a concrete MountType")

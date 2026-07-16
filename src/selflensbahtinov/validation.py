@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 import json
+import math
+import warnings
 from pathlib import Path
 from typing import Any
 from selflensbahtinov.models import (
@@ -20,6 +22,8 @@ class ProfileValidationError(ValueError):
     pass
 
 
+CURRENT_SCHEMA_VERSION = 2
+
 ROOT = {
     "schema_version",
     "manufacturer",
@@ -37,10 +41,13 @@ NEST = {
     "focal_length": {"min_mm", "max_mm"},
     "aperture": {"min_f_number", "max_f_number"},
     "mounting": {
-        "filter_thread_mm",
-        "hood_outer_diameter_mm",
-        "hood_inner_diameter_mm",
-        "barrel_outer_diameter_mm",
+        "filter_thread_nominal_mm",
+        "lens_barrel_outer_mm",
+        "lens_barrel_outer_status",
+        "hood_outer_mm",
+        "hood_outer_status",
+        "hood_inner_mm",
+        "hood_inner_status",
         "recommended_mount",
     },
     "recommended_focus": {"focal_length_mm", "aperture_f_number"},
@@ -71,9 +78,12 @@ def _strict(d: dict[str, Any], allowed: set[str], name: str):
 
 
 def _num(v: Any, name: str, positive=True) -> float:
-    if not isinstance(v, (int, float)) or isinstance(v, bool) or (positive and v <= 0):
-        raise ProfileValidationError(f"{name} must be a positive number")
-    return float(v)
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        raise ProfileValidationError(f"{name} must be a positive finite number")
+    value = float(v)
+    if not math.isfinite(value) or (positive and value <= 0):
+        raise ProfileValidationError(f"{name} must be a positive finite number")
+    return value
 
 
 def _enum(cls, v: Any, name: str):
@@ -83,11 +93,54 @@ def _enum(cls, v: Any, name: str):
         raise ProfileValidationError(f"{name} has invalid value {v!r}") from e
 
 
+def _nullable_enum(cls, v: Any, name: str):
+    return None if v is None else _enum(cls, v, name)
+
+
+def migrate_profile_data(data: dict[str, Any], source: Path | None = None) -> dict[str, Any]:
+    version = data.get("schema_version")
+    p = f"{source}: " if source else ""
+    if version == CURRENT_SCHEMA_VERSION:
+        return data
+    if version != 1:
+        raise ProfileValidationError(
+            p + f"unsupported schema_version {version!r}; expected 1 or {CURRENT_SCHEMA_VERSION}"
+        )
+    warnings.warn(
+        p + "migrating deprecated profile schema version 1 to version 2",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    old_mounting = data["mounting"]
+    old_defaults = data["defaults"]
+
+    def old_value(name: str) -> Any:
+        return old_mounting.get(name)
+
+    def migrated_status(value: Any) -> str:
+        return "unknown" if value is None else "estimated"
+
+    migrated = {**data, "schema_version": CURRENT_SCHEMA_VERSION}
+    migrated["mounting"] = {
+        "filter_thread_nominal_mm": old_value("filter_thread_mm"),
+        "lens_barrel_outer_mm": old_value("barrel_outer_diameter_mm"),
+        "lens_barrel_outer_status": migrated_status(old_value("barrel_outer_diameter_mm")),
+        "hood_outer_mm": old_value("hood_outer_diameter_mm"),
+        "hood_outer_status": migrated_status(old_value("hood_outer_diameter_mm")),
+        "hood_inner_mm": old_value("hood_inner_diameter_mm"),
+        "hood_inner_status": migrated_status(old_value("hood_inner_diameter_mm")),
+        "recommended_mount": None,
+    }
+    migrated["defaults"] = {**old_defaults, "mount_type": None}
+    return migrated
+
+
 def validate_profile_data(data: dict[str, Any], source: Path | None = None) -> None:
+    data = migrate_profile_data(data, source)
     p = f"{source}: " if source else ""
     _strict(data, ROOT, p + "profile")
-    if data["schema_version"] != 1:
-        raise ProfileValidationError(p + "schema_version must be 1")
+    if data["schema_version"] != CURRENT_SCHEMA_VERSION:
+        raise ProfileValidationError(p + f"schema_version must be {CURRENT_SCHEMA_VERSION}")
     for f in ("manufacturer", "model", "slug", "label"):
         if not isinstance(data[f], str) or not data[f].strip():
             raise ProfileValidationError(p + f"{f} must be a non-empty string")
@@ -123,16 +176,26 @@ def validate_profile_data(data: dict[str, Any], source: Path | None = None) -> N
     if not amin <= rfa <= amax:
         raise ProfileValidationError(p + "recommended aperture outside profile range")
     for k in (
-        "filter_thread_mm",
-        "hood_outer_diameter_mm",
-        "hood_inner_diameter_mm",
-        "barrel_outer_diameter_mm",
+        "filter_thread_nominal_mm",
+        "lens_barrel_outer_mm",
+        "hood_outer_mm",
+        "hood_inner_mm",
     ):
         if mt[k] is not None:
             _num(mt[k], p + "mounting." + k)
-    _enum(MountType, mt["recommended_mount"], p + "mounting.recommended_mount")
+    statuses = {"unknown", "estimated", "measured", "verified"}
+    for field in ("lens_barrel_outer", "hood_outer", "hood_inner"):
+        diameter = mt[f"{field}_mm"]
+        status = mt[f"{field}_status"]
+        if status not in statuses:
+            raise ProfileValidationError(p + f"mounting.{field}_status has invalid value {status!r}")
+        if diameter is None and status != "unknown":
+            raise ProfileValidationError(p + f"mounting.{field}_mm is null so mounting.{field}_status must be 'unknown'")
+        if diameter is not None and status == "unknown":
+            raise ProfileValidationError(p + f"mounting.{field}_mm is set so mounting.{field}_status must be estimated, measured, or verified")
+    recommended = _nullable_enum(MountType, mt["recommended_mount"], p + "mounting.recommended_mount")
     _enum(MaskType, de["mask_type"], p + "defaults.mask_type")
-    mount = _enum(MountType, de["mount_type"], p + "defaults.mount_type")
+    default_mount = _nullable_enum(MountType, de["mount_type"], p + "defaults.mount_type")
     for k in (
         "fit_clearance_mm",
         "mask_thickness_mm",
@@ -151,34 +214,32 @@ def validate_profile_data(data: dict[str, Any], source: Path | None = None) -> N
         raise ProfileValidationError(p + "ring wall thickness must be at least 1 mm")
     if not isinstance(de["engrave_label"], bool):
         raise ProfileValidationError(p + "defaults.engrave_label must be boolean")
-    recommended_mount = _enum(
-        MountType, mt["recommended_mount"], p + "mounting.recommended_mount"
-    )
-    if (
-        recommended_mount is MountType.HOOD_OUTER
-        and mt["hood_outer_diameter_mm"] is None
-    ):
-        raise ProfileValidationError(
-            p + "recommended hood_outer mount is missing hood_outer_diameter_mm"
-        )
-    if (
-        recommended_mount is MountType.BARREL_OUTER
-        and mt["barrel_outer_diameter_mm"] is None
-    ):
-        raise ProfileValidationError(
-            p + "recommended barrel_outer mount is missing barrel_outer_diameter_mm"
-        )
-    if mount is MountType.HOOD_OUTER and mt["hood_outer_diameter_mm"] is None:
-        raise ProfileValidationError(
-            p + "hood_outer_diameter_mm is required for hood_outer mounting"
-        )
-    if mount is MountType.BARREL_OUTER and mt["barrel_outer_diameter_mm"] is None:
-        raise ProfileValidationError(
-            p + "barrel_outer_diameter_mm is required for barrel_outer mounting"
-        )
+
+    def require_measured_mount(mount: MountType | None, label: str) -> None:
+        if mount is None:
+            return
+        field = {
+            MountType.LENS_BARREL_OUTER_SLIP_FIT: "lens_barrel_outer",
+            MountType.HOOD_OUTER_SLIP_FIT: "hood_outer",
+            MountType.HOOD_INNER_SLIP_FIT: "hood_inner",
+        }[mount]
+        diameter_field = f"{field}_mm"
+        status_field = f"{field}_status"
+        if mt[diameter_field] is None:
+            raise ProfileValidationError(
+                p + f"{label} {mount.value} requires mounting.{diameter_field}"
+            )
+        if mt[status_field] not in {"measured", "verified"}:
+            raise ProfileValidationError(
+                p + f"{label} {mount.value} requires mounting.{status_field} to be measured or verified"
+            )
+
+    require_measured_mount(recommended, "recommended_mount")
+    require_measured_mount(default_mount, "defaults.mount_type")
 
 
 def profile_from_dict(d: dict[str, Any]) -> LensProfile:
+    d = migrate_profile_data(d)
     return LensProfile(
         d["schema_version"],
         d["manufacturer"],
@@ -187,16 +248,19 @@ def profile_from_dict(d: dict[str, Any]) -> LensProfile:
         FocalLength(**d["focal_length"]),
         Aperture(**d["aperture"]),
         Mounting(
-            d["mounting"]["filter_thread_mm"],
-            d["mounting"]["hood_outer_diameter_mm"],
-            d["mounting"]["hood_inner_diameter_mm"],
-            d["mounting"]["barrel_outer_diameter_mm"],
-            _enum(MountType, d["mounting"]["recommended_mount"], "recommended_mount"),
+            d["mounting"]["filter_thread_nominal_mm"],
+            d["mounting"]["lens_barrel_outer_mm"],
+            d["mounting"]["lens_barrel_outer_status"],
+            d["mounting"]["hood_outer_mm"],
+            d["mounting"]["hood_outer_status"],
+            d["mounting"]["hood_inner_mm"],
+            d["mounting"]["hood_inner_status"],
+            _nullable_enum(MountType, d["mounting"]["recommended_mount"], "recommended_mount"),
         ),
         RecommendedFocus(**d["recommended_focus"]),
         ProfileDefaults(
             _enum(MaskType, d["defaults"]["mask_type"], "mask_type"),
-            _enum(MountType, d["defaults"]["mount_type"], "mount_type"),
+            _nullable_enum(MountType, d["defaults"]["mount_type"], "mount_type"),
             d["defaults"]["fit_clearance_mm"],
             d["defaults"]["mask_thickness_mm"],
             d["defaults"]["ring_depth_mm"],
@@ -211,8 +275,9 @@ def profile_from_dict(d: dict[str, Any]) -> LensProfile:
 
 def load_profile(path: Path) -> LensProfile:
     raw = json.loads(path.read_text(encoding="utf-8"))
-    validate_profile_data(raw, path)
-    return profile_from_dict(raw)
+    data = migrate_profile_data(raw, path)
+    validate_profile_data(data, path)
+    return profile_from_dict(data)
 
 
 def profile_dir() -> Path:
