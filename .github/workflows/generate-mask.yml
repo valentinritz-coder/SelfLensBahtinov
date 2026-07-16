@@ -21,7 +21,7 @@ on:
           - tribahtinov
 
       mount:
-        description: Mount type (requires measured diameter in selected profile; bundled profiles are not ready until measured)
+        description: Smooth slip-fit mounting surface
         required: true
         type: choice
         options:
@@ -29,8 +29,22 @@ on:
           - hood-outer-slip-fit
           - hood-inner-slip-fit
 
+      mount_diameter:
+        description: Measured diameter of the selected mounting surface, in millimetres
+        required: true
+        type: string
+
+      measurement_status:
+        description: Measurement provenance
+        required: true
+        default: measured
+        type: choice
+        options:
+          - measured
+          - verified
+
       clearance:
-        description: Fit clearance in millimetres
+        description: Radial fit clearance in millimetres
         required: true
         default: "0.35"
         type: string
@@ -99,12 +113,117 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+      - name: Create temporary measured profile
+        id: measured-profile
+        shell: bash
+        env:
+          PROFILE: ${{ inputs.profile }}
+          MOUNT: ${{ inputs.mount }}
+          MOUNT_DIAMETER: ${{ inputs.mount_diameter }}
+          MEASUREMENT_STATUS: ${{ inputs.measurement_status }}
+        run: |
+          TEMP_PROFILE="$RUNNER_TEMP/${PROFILE}-measured.json"
+
+          python - "$TEMP_PROFILE" <<'PY'
+          import json
+          import math
+          import os
+          import sys
+          from pathlib import Path
+
+          output_path = Path(sys.argv[1])
+          profile_slug = os.environ["PROFILE"]
+          mount = os.environ["MOUNT"]
+          status = os.environ["MEASUREMENT_STATUS"]
+
+          try:
+              diameter = float(os.environ["MOUNT_DIAMETER"])
+          except ValueError as exc:
+              raise SystemExit(
+                  "mount_diameter must be a valid number in millimetres"
+              ) from exc
+
+          if not math.isfinite(diameter) or diameter <= 0:
+              raise SystemExit(
+                  "mount_diameter must be a positive finite number"
+              )
+
+          if status not in {"measured", "verified"}:
+              raise SystemExit(
+                  "measurement_status must be measured or verified"
+              )
+
+          mount_fields = {
+              "lens-barrel-outer-slip-fit": (
+                  "lens_barrel_outer_mm",
+                  "lens_barrel_outer_status",
+              ),
+              "hood-outer-slip-fit": (
+                  "hood_outer_mm",
+                  "hood_outer_status",
+              ),
+              "hood-inner-slip-fit": (
+                  "hood_inner_mm",
+                  "hood_inner_status",
+              ),
+          }
+
+          try:
+              diameter_field, status_field = mount_fields[mount]
+          except KeyError as exc:
+              raise SystemExit(f"Unsupported mount type: {mount}") from exc
+
+          source_path = Path("profiles") / f"{profile_slug}.json"
+
+          if not source_path.is_file():
+              raise SystemExit(f"Profile not found: {source_path}")
+
+          data = json.loads(source_path.read_text(encoding="utf-8"))
+
+          if data.get("schema_version") != 2:
+              raise SystemExit(
+                  "The temporary profile workflow requires schema_version 2"
+              )
+
+          data["mounting"][diameter_field] = diameter
+          data["mounting"][status_field] = status
+
+          # The workflow passes --mount explicitly. Keeping these values null
+          # avoids persisting a temporary measurement as a profile recommendation.
+          data["mounting"]["recommended_mount"] = None
+          data["defaults"]["mount_type"] = None
+
+          output_path.write_text(
+              json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+              encoding="utf-8",
+          )
+
+          print(
+              f"Temporary profile created: {output_path}\n"
+              f"Mount: {mount}\n"
+              f"Diameter: {diameter:.3f} mm\n"
+              f"Status: {status}"
+          )
+          PY
+
+          echo "path=$TEMP_PROFILE" >> "$GITHUB_OUTPUT"
+
+      - name: Validate temporary profile
+        run: |
+          selflensbahtinov validate \
+            "${{ steps.measured-profile.outputs.path }}"
+
+      - name: Show temporary profile
+        run: |
+          selflensbahtinov show \
+            "${{ steps.measured-profile.outputs.path }}"
+
       - name: Generate mask bundle
         shell: bash
         run: |
           args=(
             generate-bundle
-            "${{ inputs.profile }}"
+            "${{ steps.measured-profile.outputs.path }}"
             --mask "${{ inputs.mask }}"
             --mount "${{ inputs.mount }}"
             --clearance "${{ inputs.clearance }}"
@@ -124,6 +243,23 @@ jobs:
 
           selflensbahtinov "${args[@]}"
 
+      - name: Save generation metadata
+        shell: bash
+        run: |
+          cat > generated/generation-metadata.txt <<EOF
+          Profile: ${{ inputs.profile }}
+          Mask: ${{ inputs.mask }}
+          Mount: ${{ inputs.mount }}
+          Measured diameter: ${{ inputs.mount_diameter }} mm
+          Measurement status: ${{ inputs.measurement_status }}
+          Radial clearance: ${{ inputs.clearance }} mm
+          Slot width: ${{ inputs.slot_width || 'automatic' }}
+          Slot spacing: ${{ inputs.slot_spacing || 'automatic' }}
+          Slot density: ${{ inputs.slot_density }}
+          Commit: ${{ github.sha }}
+          Workflow run: ${{ github.run_number }}
+          EOF
+
       - name: List generated files
         run: |
           find generated -maxdepth 1 -type f -printf "%f\n" | sort
@@ -131,7 +267,9 @@ jobs:
       - name: Upload generated models
         uses: actions/upload-artifact@v7
         with:
-          name: bahtinov-${{ inputs.profile }}-${{ inputs.mask }}-${{ github.run_number }}
+          name: >-
+            bahtinov-${{ inputs.profile }}-${{ inputs.mask }}-${{
+            inputs.mount }}-${{ github.run_number }}
           path: generated/
           if-no-files-found: error
           retention-days: 30
