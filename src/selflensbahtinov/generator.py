@@ -13,10 +13,11 @@ from selflensbahtinov.renderer import OpenScadRenderer
 
 
 def base_name(req: GenerationRequest, test_ring: bool = False) -> str:
+    mount = req.mount_type.value.replace("_", "-")
     suffix = (
-        "test-ring"
+        f"test-ring-{mount}"
         if test_ring
-        else f"{req.mask_type.value}-{req.mount_type.value.replace('_','-')}"
+        else f"{req.mask_type.value}-{mount}"
     )
     return f"{req.profile.slug}-{suffix}"
 

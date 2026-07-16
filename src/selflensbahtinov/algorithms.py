@@ -44,6 +44,10 @@ class AlgorithmOptions:
     slot_spacing_mm: float | None = None
     slot_density: float = 1.0
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.mount_type, MountType):
+            raise TypeError("AlgorithmOptions.mount_type must be a concrete MountType")
+
 
 @dataclass(frozen=True)
 class GratingModel:
@@ -70,9 +74,24 @@ class MaskAlgorithm(ABC):
 
 
 def _ring(profile: LensProfile, options: AlgorithmOptions) -> RingGeometry:
-    mount_diameter = profile.mount_diameter_mm(options.mount_type)
-    inner_diameter = mount_diameter + 2 * options.clearance_mm
+    mount_diameter, mount_status = profile.mount_measurement(options.mount_type)
+    if mount_status == "unknown":
+        raise ValueError(f"{options.mount_type.value} has unknown measurement status")
+    if mount_status == "estimated" and not options.test_ring:
+        raise ValueError(
+            f"{options.mount_type.value} has estimated measurement status; "
+            "estimated mounts may generate test rings only"
+        )
     wall = profile.defaults.ring_wall_thickness_mm
+    if options.mount_type is MountType.HOOD_INNER_SLIP_FIT:
+        # Hood-inner slip fit inserts into a hood opening, so radial clearance
+        # reduces the printable outside diameter of the skirt.
+        outer_diameter = mount_diameter - 2 * options.clearance_mm
+        inner_diameter = outer_diameter - 2 * wall
+    else:
+        # Lens-barrel and hood-outer slip fits slide over an outside surface.
+        inner_diameter = mount_diameter + 2 * options.clearance_mm
+        outer_diameter = inner_diameter + 2 * wall
     depth = (
         min(profile.defaults.ring_depth_mm, 4.0)
         if options.test_ring
@@ -84,7 +103,7 @@ def _ring(profile: LensProfile, options: AlgorithmOptions) -> RingGeometry:
         ("ring_wall_thickness_mm", wall),
         ("ring_depth_mm", depth),
         ("ring_inner_diameter_mm", inner_diameter),
-        ("ring_outer_diameter_mm", inner_diameter + 2 * wall),
+        ("ring_outer_diameter_mm", outer_diameter),
         ("pattern_border_mm", options.pattern_border_mm),
     ):
         _validate_finite(name, value)
@@ -96,13 +115,13 @@ def _ring(profile: LensProfile, options: AlgorithmOptions) -> RingGeometry:
         raise ValueError("pattern_border_mm must be greater than or equal to zero")
     if wall <= 0 or depth <= 0:
         raise ValueError("ring dimensions must be greater than zero")
-    if inner_diameter <= 0 or inner_diameter + 2 * wall <= inner_diameter:
+    if inner_diameter <= 0 or outer_diameter <= inner_diameter:
         raise ValueError("ring diameters must be valid positive dimensions")
     return RingGeometry(
         mount_type=options.mount_type,
         mount_diameter_mm=mount_diameter,
         inner_diameter_mm=inner_diameter,
-        outer_diameter_mm=inner_diameter + 2 * wall,
+        outer_diameter_mm=outer_diameter,
         wall_thickness_mm=wall,
         depth_mm=depth,
         clearance_mm=options.clearance_mm,
@@ -338,8 +357,4 @@ ALGORITHMS = {
 
 
 def calculate_mask(profile: LensProfile, options: AlgorithmOptions) -> MaskGeometry:
-    if options.mount_type is MountType.UNIVERSAL_SCREWS:
-        raise NotImplementedError(
-            "universal-screws mounting is planned but not implemented in V1"
-        )
     return ALGORITHMS[options.mask_type].calculate(profile, options)

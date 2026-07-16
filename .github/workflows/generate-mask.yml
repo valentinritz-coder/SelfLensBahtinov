@@ -21,14 +21,13 @@ on:
           - tribahtinov
 
       mount:
-        description: Mount type
+        description: Mount type (requires measured diameter in selected profile; bundled profiles are not ready until measured)
         required: true
-        default: filter-thread
         type: choice
         options:
-          - filter-thread
-          - hood-outer
-          - barrel-outer
+          - lens-barrel-outer-slip-fit
+          - hood-outer-slip-fit
+          - hood-inner-slip-fit
 
       clearance:
         description: Fit clearance in millimetres
