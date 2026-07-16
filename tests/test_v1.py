@@ -12,7 +12,7 @@ import pytest
 
 from selflensbahtinov.algorithms import AlgorithmOptions, calculate_mask
 from selflensbahtinov.generator import generate, openscad_command_for
-from selflensbahtinov.models import GenerationRequest, MaskType, MountType, OutputFormat
+from selflensbahtinov.models import GenerationRequest, GratingRegion, MaskType, MountType, OutputFormat
 from selflensbahtinov.openscad import (
     OpenScadError,
     UnsupportedFormatError,
@@ -318,12 +318,78 @@ def test_geometry_invariants_and_slot_counts_for_bundled_profiles():
 def test_bahtinov_and_tribahtinov_physical_regions():
     b = calculate_mask(prof(), opts(mt=MaskType.BAHTINOV))
     t = calculate_mask(prof(), opts(mt=MaskType.TRIBAHTINOV))
-    assert {(s.sector_start_deg, s.sector_end_deg) for s in b.slots} == {
-        (-60, 60),
-        (60, 180),
-        (180, 300),
+    assert {s.region for s in b.slots} == {
+        GratingRegion.LEFT_REFERENCE,
+        GratingRegion.RIGHT_UPPER,
+        GratingRegion.RIGHT_LOWER,
     }
-    assert len({(s.sector_start_deg, s.sector_end_deg) for s in t.slots}) == 6
+    assert b.region_gap_mm == pytest.approx(2.0)
+    assert len({s.region for s in t.slots}) == 6
+    assert all(s.region.value.startswith("tribahtinov-") for s in t.slots)
+    assert t.region_gap_mm == pytest.approx(0.0)
+
+
+def test_bahtinov_region_topology_snapshot_and_symmetry():
+    g = calculate_mask(prof(), opts(mt=MaskType.BAHTINOV))
+    by_region = {region: [s for s in g.slots if s.region is region] for region in {s.region for s in g.slots}}
+    assert {r.value: sorted({s.angle_deg for s in slots}) for r, slots in by_region.items()} == {
+        "left-reference": [0],
+        "right-upper": [60.0],
+        "right-lower": [-60.0],
+    }
+    assert len(by_region[GratingRegion.LEFT_REFERENCE]) > 0
+    assert len(by_region[GratingRegion.RIGHT_UPPER]) == len(by_region[GratingRegion.RIGHT_LOWER])
+    upper = sorted((s.center.x, s.center.y, s.angle_deg) for s in by_region[GratingRegion.RIGHT_UPPER])
+    lower = sorted((s.center.x, -s.center.y, -s.angle_deg) for s in by_region[GratingRegion.RIGHT_LOWER])
+    assert upper == lower
+
+
+def test_region_gap_validation_and_separator_clip_are_explicit():
+    with pytest.raises(ValueError, match="region_gap_mm must be greater than or equal to zero"):
+        calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "region_gap_mm": -0.1}))
+    with pytest.raises(ValueError, match="printable minimum"):
+        calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "region_gap_mm": 0.5}))
+    with pytest.raises(ValueError, match="leaves no usable area"):
+        calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "region_gap_mm": 200.0}))
+    scad = OpenScadRenderer().render_scad(calculate_mask(prof(), opts()))
+    assert 'region_gap_mm = 2.0000;' in scad
+    assert 'region == "left-reference" ? [[-r, -r], [-g, -r], [-g, r], [-r, r]]' in scad
+    assert 'region == "right-upper" ? [[g, g], [r, g], [r, r], [g, r]]' in scad
+    assert 'region == "right-lower" ? [[g, -g], [r, -g], [r, -r], [g, -r]]' in scad
+    assert "sector_clip(start_deg, end_deg)" not in scad
+    assert "-60.000, 60.000" not in scad
+
+
+def test_region_gap_validation_applies_only_to_normal_bahtinov():
+    invalid = {**opts().__dict__, "region_gap_mm": 200.0}
+    with pytest.raises(ValueError, match="leaves no usable area"):
+        calculate_mask(prof(), AlgorithmOptions(**invalid))
+    tri = calculate_mask(
+        prof(),
+        AlgorithmOptions(**{**invalid, "mask_type": MaskType.TRIBAHTINOV}),
+    )
+    assert tri.region_gap_mm == pytest.approx(0.0)
+    assert {s.region for s in tri.slots} == {
+        GratingRegion.TRIBAHTINOV_0,
+        GratingRegion.TRIBAHTINOV_1,
+        GratingRegion.TRIBAHTINOV_2,
+        GratingRegion.TRIBAHTINOV_3,
+        GratingRegion.TRIBAHTINOV_4,
+        GratingRegion.TRIBAHTINOV_5,
+    }
+
+
+def test_tribahtinov_scad_ignores_region_gap_and_remains_deterministic():
+    base = {**opts(mt=MaskType.TRIBAHTINOV).__dict__}
+    scad_a = OpenScadRenderer().render_scad(
+        calculate_mask(prof(), AlgorithmOptions(**{**base, "region_gap_mm": -1.0}))
+    )
+    scad_b = OpenScadRenderer().render_scad(
+        calculate_mask(prof(), AlgorithmOptions(**{**base, "region_gap_mm": 200.0}))
+    )
+    assert scad_a == scad_b
+    assert "region_gap_mm = 0.0000;" in scad_a
+    assert "tribahtinov-0" in scad_a
 
 
 def test_configurable_bahtinov_grating_dimensions():
@@ -393,7 +459,7 @@ def test_full_mask_scad_preserves_front_face_and_clips_slots():
     )  # clear aperture is used only inside slot intersections
     assert "intersection()" in scad
     assert "aperture_clip();" in scad
-    assert "sector_clip(start_deg, end_deg);" in scad
+    assert "region_clip(region);" in scad
     assert "clipped_slot(" in scad
 
 
@@ -785,6 +851,8 @@ def test_generate_bundle_real_3mf_fallback_path(monkeypatch, tmp_path):
             "5.0",
             "--slot-density",
             "1.5",
+            "--region-gap",
+            "3.5",
             "--output-dir",
             str(tmp_path),
             "--openscad",
@@ -840,6 +908,7 @@ def test_generate_bundle_3mf_fallback_preserves_slot_controls(monkeypatch, tmp_p
         assert req.slot_width_mm == pytest.approx(1.2)
         assert req.slot_spacing_mm == pytest.approx(5.0)
         assert req.slot_density == pytest.approx(1.5)
+        assert req.region_gap_mm == pytest.approx(3.5)
         assert req.output_dir == tmp_path
         assert req.openscad == "fake-openscad"
         assert req.dry_run is True
@@ -861,6 +930,8 @@ def test_generate_bundle_3mf_fallback_preserves_slot_controls(monkeypatch, tmp_p
             "5.0",
             "--slot-density",
             "1.5",
+            "--region-gap",
+            "3.5",
             "--output-dir",
             str(tmp_path),
             "--openscad",

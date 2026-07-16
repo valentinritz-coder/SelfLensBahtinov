@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse, logging, sys
 from pathlib import Path
+from selflensbahtinov.algorithms import DEFAULT_REGION_GAP_MM
 from selflensbahtinov.generator import generate, geometry_for
 from selflensbahtinov.models import GenerationRequest, MaskType, MountType, OutputFormat
 from selflensbahtinov.openscad import OpenScadError, UnsupportedFormatError
@@ -61,6 +62,7 @@ def parser():
         g.add_argument("--aperture", type=float)
         g.add_argument("--clearance", type=float)
         g.add_argument("--pattern-border", type=float)
+        g.add_argument("--region-gap", type=float, default=DEFAULT_REGION_GAP_MM)
         g.add_argument("--slot-width", type=float)
         g.add_argument("--slot-spacing", type=float)
         g.add_argument("--slot-density", type=float, default=1.0)
@@ -119,6 +121,7 @@ def _req(a, prof):
             if a.pattern_border is not None
             else prof.defaults.pattern_border_mm
         ),
+        region_gap_mm=a.region_gap,
         label=False if a.no_label else (True if a.label else prof.defaults.engrave_label),
         slot_width_mm=a.slot_width,
         slot_spacing_mm=a.slot_spacing,
@@ -185,6 +188,7 @@ def main(argv=None):
                 aperture_f_number=req.aperture_f_number,
                 clearance_mm=req.clearance_mm,
                 pattern_border_mm=req.pattern_border_mm,
+                region_gap_mm=req.region_gap_mm,
                 label=req.label,
                 slot_width_mm=req.slot_width_mm,
                 slot_spacing_mm=req.slot_spacing_mm,
@@ -206,6 +210,7 @@ def main(argv=None):
                     aperture_f_number=req.aperture_f_number,
                     clearance_mm=req.clearance_mm,
                     pattern_border_mm=req.pattern_border_mm,
+                    region_gap_mm=req.region_gap_mm,
                     label=req.label,
                     slot_width_mm=req.slot_width_mm,
                     slot_spacing_mm=req.slot_spacing_mm,

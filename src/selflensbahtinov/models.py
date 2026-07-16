@@ -23,6 +23,18 @@ class OutputFormat(str, Enum):
     THREEMF = "3mf"
 
 
+class GratingRegion(str, Enum):
+    LEFT_REFERENCE = "left-reference"
+    RIGHT_UPPER = "right-upper"
+    RIGHT_LOWER = "right-lower"
+    TRIBAHTINOV_0 = "tribahtinov-0"
+    TRIBAHTINOV_1 = "tribahtinov-1"
+    TRIBAHTINOV_2 = "tribahtinov-2"
+    TRIBAHTINOV_3 = "tribahtinov-3"
+    TRIBAHTINOV_4 = "tribahtinov-4"
+    TRIBAHTINOV_5 = "tribahtinov-5"
+
+
 @dataclass(frozen=True)
 class FocalLength:
     min_mm: float
@@ -118,8 +130,7 @@ class SlotGeometry:
     length_mm: float
     width_mm: float
     angle_deg: float
-    sector_start_deg: float | None = None
-    sector_end_deg: float | None = None
+    region: GratingRegion
 
 
 @dataclass(frozen=True)
@@ -170,6 +181,7 @@ class MaskGeometry:
     ring: RingGeometry
     thickness_mm: float
     pattern_border_mm: float
+    region_gap_mm: float
     label: LabelGeometry | None
     grating: GratingMetadata | None
     test_ring: bool = False
@@ -185,7 +197,8 @@ class GenerationRequest:
     aperture_f_number: float
     clearance_mm: float
     pattern_border_mm: float
-    label: bool
+    region_gap_mm: float = 2.0
+    label: bool = True
     slot_width_mm: float | None
     slot_spacing_mm: float | None
     slot_density: float

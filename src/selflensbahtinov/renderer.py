@@ -37,17 +37,26 @@ class OpenScadRenderer(MaskRenderer):
             "module aperture_clip() {",
             f"  translate([0, 0, -epsilon]) cylinder(h=mask_thickness_mm + 2 * epsilon, d={geometry.clear_aperture_mm:.4f});",
             "}",
-            "module sector_clip(start_deg, end_deg) {",
+            f"region_gap_mm = {geometry.region_gap_mm:.4f};",
+            "module region_clip(region) {",
             f"  r = {radius + geometry.slot_spacing_mm * 2:.4f};",
-            "  step = max(2, ceil(abs(end_deg - start_deg) / 8));",
-            "  points = concat([[0, 0]], [for (i = [0:step]) [r * cos(start_deg + (end_deg - start_deg) * i / step), r * sin(start_deg + (end_deg - start_deg) * i / step)]]);",
+            "  g = region_gap_mm / 2;",
+            "  points = region == \"left-reference\" ? [[-r, -r], [-g, -r], [-g, r], [-r, r]] :",
+            "    region == \"right-upper\" ? [[g, g], [r, g], [r, r], [g, r]] :",
+            "    region == \"right-lower\" ? [[g, -g], [r, -g], [r, -r], [g, -r]] :",
+            "    region == \"tribahtinov-0\" ? concat([[0, 0]], [for (i = [0:8]) [r * cos(-60 + 60 * i / 8), r * sin(-60 + 60 * i / 8)]]) :",
+            "    region == \"tribahtinov-1\" ? concat([[0, 0]], [for (i = [0:8]) [r * cos(0 + 60 * i / 8), r * sin(0 + 60 * i / 8)]]) :",
+            "    region == \"tribahtinov-2\" ? concat([[0, 0]], [for (i = [0:8]) [r * cos(60 + 60 * i / 8), r * sin(60 + 60 * i / 8)]]) :",
+            "    region == \"tribahtinov-3\" ? concat([[0, 0]], [for (i = [0:8]) [r * cos(120 + 60 * i / 8), r * sin(120 + 60 * i / 8)]]) :",
+            "    region == \"tribahtinov-4\" ? concat([[0, 0]], [for (i = [0:8]) [r * cos(180 + 60 * i / 8), r * sin(180 + 60 * i / 8)]]) :",
+            "    concat([[0, 0]], [for (i = [0:8]) [r * cos(240 + 60 * i / 8), r * sin(240 + 60 * i / 8)]]);",
             "  translate([0, 0, -epsilon]) linear_extrude(height=mask_thickness_mm + 2 * epsilon) polygon(points);",
             "}",
-            "module clipped_slot(cx, cy, len, wid, angle, start_deg, end_deg) {",
+            "module clipped_slot(cx, cy, len, wid, angle, region) {",
             "  intersection() {",
             "    slot_rectangle(cx, cy, len, wid, angle);",
             "    aperture_clip();",
-            "    sector_clip(start_deg, end_deg);",
+            "    region_clip(region);",
             "  }",
             "}",
         ]
@@ -71,7 +80,7 @@ class OpenScadRenderer(MaskRenderer):
         ]
         for slot in g.slots:
             lines.append(
-                f"  clipped_slot({slot.center.x:.4f}, {slot.center.y:.4f}, {slot.length_mm:.4f}, {slot.width_mm:.4f}, {slot.angle_deg:.3f}, {slot.sector_start_deg:.3f}, {slot.sector_end_deg:.3f});"
+                f'  clipped_slot({slot.center.x:.4f}, {slot.center.y:.4f}, {slot.length_mm:.4f}, {slot.width_mm:.4f}, {slot.angle_deg:.3f}, "{slot.region.value}");'
             )
         if g.label:
             lines.extend(
