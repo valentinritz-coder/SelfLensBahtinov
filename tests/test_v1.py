@@ -262,7 +262,7 @@ def test_deprecated_filter_thread_alias_does_not_bypass_missing_measurement(caps
 
 def test_github_action_mount_has_no_misleading_default():
     workflow = Path(".github/workflows/generate-mask.yml").read_text(encoding="utf-8")
-    mount_block = workflow.split("      mount:", 1)[1].split("      clearance:", 1)[0]
+    mount_block = workflow.split("      mount:", 1)[1].split("      mount_diameter:", 1)[0]
     assert "default:" not in mount_block
     assert "requires measured diameter" in mount_block
     assert "bundled profiles are not ready until measured" in mount_block
