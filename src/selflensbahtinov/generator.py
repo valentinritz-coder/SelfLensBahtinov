@@ -32,6 +32,7 @@ def geometry_for(req: GenerationRequest, test_ring: bool = False):
             aperture_f_number=req.aperture_f_number,
             clearance_mm=req.clearance_mm,
             pattern_border_mm=req.pattern_border_mm,
+            region_gap_mm=req.region_gap_mm,
             label=req.label,
             test_ring=test_ring,
             slot_width_mm=req.slot_width_mm,

@@ -9,6 +9,7 @@ from collections.abc import Iterable
 
 from selflensbahtinov.models import (
     GratingMetadata,
+    GratingRegion,
     LabelGeometry,
     LensProfile,
     MaskGeometry,
@@ -28,6 +29,7 @@ MIN_EFFECTIVE_PITCH_MM = 1.6
 MAX_PRACTICAL_SLOT_COUNT = 1000
 REFERENCE_WAVELENGTH_NM = 550.0
 TARGET_SPIKE_OFFSET_AT_SENSOR_MM = 0.060
+DEFAULT_REGION_GAP_MM = 2.0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -38,7 +40,8 @@ class AlgorithmOptions:
     aperture_f_number: float
     clearance_mm: float
     pattern_border_mm: float
-    label: bool
+    region_gap_mm: float = DEFAULT_REGION_GAP_MM
+    label: bool = True
     test_ring: bool = False
     slot_width_mm: float | None = None
     slot_spacing_mm: float | None = None
@@ -51,7 +54,7 @@ class AlgorithmOptions:
 
 @dataclass(frozen=True)
 class GratingModel:
-    """Transmission-grating parameters used to lay out one aperture sector."""
+    """Transmission-grating parameters used to lay out one aperture region."""
 
     base_pitch_mm: float
     pitch_mm: float
@@ -221,15 +224,28 @@ def _grating_model(clear_aperture_mm: float, options: AlgorithmOptions) -> Grati
     )
 
 
+def _validate_region_gap(clear_aperture_mm: float, region_gap_mm: float) -> float:
+    _validate_finite("region_gap_mm", region_gap_mm)
+    gap = round(region_gap_mm, 4)
+    if gap < 0:
+        raise ValueError("region_gap_mm must be greater than or equal to zero")
+    if 0 < gap < MIN_OPAQUE_BAR_WIDTH_MM:
+        raise ValueError("region_gap_mm is below the printable minimum")
+    radius = clear_aperture_mm / 2
+    if gap >= radius * math.sqrt(2):
+        raise ValueError("region_gap_mm leaves no usable area in every region")
+    return gap
+
+
 def _grating_slots(
     clear_aperture_mm: float,
     model: GratingModel,
-    sectors: Iterable[tuple[float, float, float]],
+    regions: Iterable[tuple[GratingRegion, float]],
 ) -> tuple[SlotGeometry, ...]:
     radius = clear_aperture_mm / 2
     length = clear_aperture_mm + 2 * model.pitch_mm
     slots: list[SlotGeometry] = []
-    for sector_start, sector_end, slot_angle in sectors:
+    for region, slot_angle in regions:
         normal_angle = math.radians(slot_angle + 90)
         count = math.ceil((radius + model.open_width_mm / 2) / model.pitch_mm)
         if count * 2 + 1 > MAX_PRACTICAL_SLOT_COUNT:
@@ -249,8 +265,7 @@ def _grating_slots(
                     length_mm=round(length, 4),
                     width_mm=model.open_width_mm,
                     angle_deg=slot_angle,
-                    sector_start_deg=sector_start,
-                    sector_end_deg=sector_end,
+                    region=region,
                 )
             )
         if region_count == 0:
@@ -264,7 +279,7 @@ def _base(
     profile: LensProfile,
     options: AlgorithmOptions,
     mask_type: MaskType,
-    sectors: tuple[tuple[float, float, float], ...],
+    regions: tuple[tuple[GratingRegion, float], ...],
 ) -> MaskGeometry:
     ring = _ring(profile, options)
     clear_aperture = ring.inner_diameter_mm - 2 * options.pattern_border_mm
@@ -276,7 +291,13 @@ def _base(
         model = None
         metadata = None
         slots = ()
+        region_gap = 0.0
     else:
+        region_gap = (
+            _validate_region_gap(clear_aperture, options.region_gap_mm)
+            if mask_type is MaskType.BAHTINOV
+            else 0.0
+        )
         model = _grating_model(clear_aperture, options)
         metadata = GratingMetadata(
             base_pitch_mm=model.base_pitch_mm,
@@ -290,7 +311,7 @@ def _base(
             first_order_sensor_offset_mm=model.first_order_sensor_offset_mm,
             pitch_selection_source=model.pitch_selection_source,
         )
-        slots = _grating_slots(clear_aperture, model, sectors)
+        slots = _grating_slots(clear_aperture, model, regions)
     label = None
     if options.label and not options.test_ring:
         label_radius = clear_aperture / 2 + max(
@@ -311,6 +332,7 @@ def _base(
         pattern_border_mm=options.pattern_border_mm,
         label=label,
         grating=metadata,
+        region_gap_mm=region_gap,
         test_ring=options.test_ring,
     )
 
@@ -324,9 +346,9 @@ class BahtinovMaskAlgorithm(MaskAlgorithm):
             options,
             MaskType.BAHTINOV,
             (
-                (-60, 60, 0),
-                (60, 180, BAHTINOV_GRATING_ANGLE_DEG),
-                (180, 300, -BAHTINOV_GRATING_ANGLE_DEG),
+                (GratingRegion.LEFT_REFERENCE, 0),
+                (GratingRegion.RIGHT_UPPER, BAHTINOV_GRATING_ANGLE_DEG),
+                (GratingRegion.RIGHT_LOWER, -BAHTINOV_GRATING_ANGLE_DEG),
             ),
         )
 
@@ -340,12 +362,12 @@ class TriBahtinovMaskAlgorithm(MaskAlgorithm):
             options,
             MaskType.TRIBAHTINOV,
             (
-                (-60, 0, 0),
-                (0, 60, 90),
-                (60, 120, 60),
-                (120, 180, 150),
-                (180, 240, -60),
-                (240, 300, 30),
+                (GratingRegion.TRIBAHTINOV_0, 0),
+                (GratingRegion.TRIBAHTINOV_1, 90),
+                (GratingRegion.TRIBAHTINOV_2, 60),
+                (GratingRegion.TRIBAHTINOV_3, 150),
+                (GratingRegion.TRIBAHTINOV_4, -60),
+                (GratingRegion.TRIBAHTINOV_5, 30),
             ),
         )
 
