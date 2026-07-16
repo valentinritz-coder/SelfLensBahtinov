@@ -38,6 +38,7 @@ def geometry_for(req: GenerationRequest, test_ring: bool = False):
             slot_width_mm=req.slot_width_mm,
             slot_spacing_mm=req.slot_spacing_mm,
             slot_density=req.slot_density,
+            minimum_clipped_slot_length_mm=req.minimum_clipped_slot_length_mm,
         ),
     )
 

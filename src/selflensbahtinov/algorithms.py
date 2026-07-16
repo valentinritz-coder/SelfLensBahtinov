@@ -30,6 +30,10 @@ MAX_PRACTICAL_SLOT_COUNT = 1000
 REFERENCE_WAVELENGTH_NM = 550.0
 TARGET_SPIKE_OFFSET_AT_SENSOR_MM = 0.060
 DEFAULT_REGION_GAP_MM = 2.0
+CIRCLE_CLIP_SEGMENTS = 256
+
+
+Polygon = tuple[Point2D, ...]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -46,6 +50,7 @@ class AlgorithmOptions:
     slot_width_mm: float | None = None
     slot_spacing_mm: float | None = None
     slot_density: float = 1.0
+    minimum_clipped_slot_length_mm: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.mount_type, MountType):
@@ -237,10 +242,113 @@ def _validate_region_gap(clear_aperture_mm: float, region_gap_mm: float) -> floa
     return gap
 
 
+def _default_minimum_clipped_slot_length(width_mm: float) -> float:
+    return round(max(2 * width_mm, 4.0), 4)
+
+
+def _minimum_clipped_slot_length(model: GratingModel, options: AlgorithmOptions) -> float:
+    value = options.minimum_clipped_slot_length_mm
+    if value is None:
+        return _default_minimum_clipped_slot_length(model.open_width_mm)
+    _validate_finite("minimum_clipped_slot_length_mm", value)
+    if value < 0:
+        raise ValueError("minimum_clipped_slot_length_mm must be greater than or equal to zero")
+    return round(value, 4)
+
+
+def _candidate_slot_polygon(center: Point2D, length: float, width: float, angle_deg: float) -> Polygon:
+    a = math.radians(angle_deg)
+    ux, uy = math.cos(a), math.sin(a)
+    vx, vy = -math.sin(a), math.cos(a)
+    return tuple(
+        Point2D(center.x + sx * ux * length / 2 + sy * vx * width / 2, center.y + sx * uy * length / 2 + sy * vy * width / 2)
+        for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))
+    )
+
+
+def _circle_polygon(radius: float) -> Polygon:
+    return tuple(Point2D(radius * math.cos(2 * math.pi * i / CIRCLE_CLIP_SEGMENTS), radius * math.sin(2 * math.pi * i / CIRCLE_CLIP_SEGMENTS)) for i in range(CIRCLE_CLIP_SEGMENTS))
+
+
+def _region_polygon(region: GratingRegion, radius: float, gap: float) -> Polygon:
+    r = radius * 3
+    g = gap / 2
+    if region is GratingRegion.LEFT_REFERENCE:
+        pts = [(-r, -r), (-g, -r), (-g, r), (-r, r)]
+    elif region is GratingRegion.RIGHT_UPPER:
+        pts = [(g, g), (r, g), (r, r), (g, r)]
+    elif region is GratingRegion.RIGHT_LOWER:
+        pts = [(g, -g), (g, -r), (r, -r), (r, -g)]
+    else:
+        raise ValueError("clipped slot filtering is only applied to normal Bahtinov regions")
+    return tuple(Point2D(x, y) for x, y in pts)
+
+
+def _cross(a: Point2D, b: Point2D, c: Point2D) -> float:
+    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+
+
+def _line_intersection(p1: Point2D, p2: Point2D, q1: Point2D, q2: Point2D) -> Point2D:
+    dx1, dy1 = p2.x - p1.x, p2.y - p1.y
+    dx2, dy2 = q2.x - q1.x, q2.y - q1.y
+    den = dx1 * dy2 - dy1 * dx2
+    if abs(den) < 1e-12:
+        return p2
+    t = ((q1.x - p1.x) * dy2 - (q1.y - p1.y) * dx2) / den
+    return Point2D(p1.x + t * dx1, p1.y + t * dy1)
+
+
+def _clip_polygon(subject: Polygon, clipper: Polygon) -> Polygon:
+    output = list(subject)
+    for a, b in zip(clipper, clipper[1:] + clipper[:1]):
+        inp = output
+        output = []
+        if not inp:
+            break
+        prev = inp[-1]
+        prev_inside = _cross(a, b, prev) >= -1e-9
+        for cur in inp:
+            cur_inside = _cross(a, b, cur) >= -1e-9
+            if cur_inside:
+                if not prev_inside:
+                    output.append(_line_intersection(prev, cur, a, b))
+                output.append(cur)
+            elif prev_inside:
+                output.append(_line_intersection(prev, cur, a, b))
+            prev, prev_inside = cur, cur_inside
+    return tuple(output)
+
+
+def _polygon_area(poly: Polygon) -> float:
+    if len(poly) < 3:
+        return 0.0
+    return abs(sum(a.x * b.y - b.x * a.y for a, b in zip(poly, poly[1:] + poly[:1]))) / 2
+
+
+def _projected_length(poly: Polygon, angle_deg: float) -> float:
+    if not poly:
+        return 0.0
+    a = math.radians(angle_deg)
+    ux, uy = math.cos(a), math.sin(a)
+    vals = [p.x * ux + p.y * uy for p in poly]
+    return max(vals) - min(vals)
+
+
+def _slot_useful_geometry(center: Point2D, length: float, width: float, angle_deg: float, region: GratingRegion, radius: float, gap: float) -> tuple[float, float]:
+    poly = _candidate_slot_polygon(center, length, width, angle_deg)
+    poly = _clip_polygon(poly, _circle_polygon(radius))
+    poly = _clip_polygon(poly, _region_polygon(region, radius, gap))
+    return _projected_length(poly, angle_deg), _polygon_area(poly)
+
+
 def _grating_slots(
     clear_aperture_mm: float,
     model: GratingModel,
     regions: Iterable[tuple[GratingRegion, float]],
+    *,
+    minimum_clipped_slot_length_mm: float = 0.0,
+    region_gap_mm: float = 0.0,
+    filter_clipped_slots: bool = False,
 ) -> tuple[SlotGeometry, ...]:
     radius = clear_aperture_mm / 2
     length = clear_aperture_mm + 2 * model.pitch_mm
@@ -255,21 +363,32 @@ def _grating_slots(
             offset = index * model.pitch_mm
             if abs(offset) > radius + model.open_width_mm / 2:
                 continue
+            center = Point2D(
+                round(math.cos(normal_angle) * offset, 4),
+                round(math.sin(normal_angle) * offset, 4),
+            )
+            useful_length = length
+            clipped_area = None
+            if filter_clipped_slots:
+                useful_length, clipped_area = _slot_useful_geometry(
+                    center, length, model.open_width_mm, slot_angle, region, radius, region_gap_mm
+                )
+                if minimum_clipped_slot_length_mm > 0 and useful_length < minimum_clipped_slot_length_mm:
+                    continue
             region_count += 1
             slots.append(
                 SlotGeometry(
-                    center=Point2D(
-                        round(math.cos(normal_angle) * offset, 4),
-                        round(math.sin(normal_angle) * offset, 4),
-                    ),
+                    center=center,
                     length_mm=round(length, 4),
                     width_mm=model.open_width_mm,
                     angle_deg=slot_angle,
                     region=region,
+                    useful_length_mm=round(useful_length, 4),
+                    clipped_area_mm2=None if clipped_area is None else round(clipped_area, 4),
                 )
             )
         if region_count == 0:
-            raise ValueError("each assigned grating region must contain a candidate slot")
+            raise ValueError("minimum_clipped_slot_length_mm leaves a required grating region with no retained slots")
     if len({s for s in slots}) != len(slots):
         raise ValueError("duplicate slots generated for grating regions")
     return tuple(slots)
@@ -311,7 +430,15 @@ def _base(
             first_order_sensor_offset_mm=model.first_order_sensor_offset_mm,
             pitch_selection_source=model.pitch_selection_source,
         )
-        slots = _grating_slots(clear_aperture, model, regions)
+        min_slot_length = _minimum_clipped_slot_length(model, options)
+        slots = _grating_slots(
+            clear_aperture,
+            model,
+            regions,
+            minimum_clipped_slot_length_mm=min_slot_length,
+            region_gap_mm=region_gap,
+            filter_clipped_slots=mask_type is MaskType.BAHTINOV,
+        )
     label = None
     if options.label and not options.test_ring:
         label_radius = clear_aperture / 2 + max(

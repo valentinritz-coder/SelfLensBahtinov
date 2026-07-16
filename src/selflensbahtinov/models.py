@@ -131,6 +131,8 @@ class SlotGeometry:
     width_mm: float
     angle_deg: float
     region: GratingRegion
+    useful_length_mm: float
+    clipped_area_mm2: float | None = None
 
 
 @dataclass(frozen=True)
@@ -205,6 +207,7 @@ class GenerationRequest:
     output_dir: Path
     openscad: str
     dry_run: bool = False
+    minimum_clipped_slot_length_mm: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.mount_type, MountType):

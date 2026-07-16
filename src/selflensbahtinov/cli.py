@@ -66,6 +66,7 @@ def parser():
         g.add_argument("--slot-width", type=float)
         g.add_argument("--slot-spacing", type=float)
         g.add_argument("--slot-density", type=float, default=1.0)
+        g.add_argument("--minimum-clipped-slot-length", type=float)
         lab = g.add_mutually_exclusive_group()
         lab.add_argument("--label", action="store_true")
         lab.add_argument("--no-label", action="store_true")
@@ -126,6 +127,7 @@ def _req(a, prof):
         slot_width_mm=a.slot_width,
         slot_spacing_mm=a.slot_spacing,
         slot_density=a.slot_density,
+        minimum_clipped_slot_length_mm=a.minimum_clipped_slot_length,
         output_dir=a.output_dir,
         openscad=a.openscad,
         dry_run=a.dry_run,
@@ -193,6 +195,7 @@ def main(argv=None):
                 slot_width_mm=req.slot_width_mm,
                 slot_spacing_mm=req.slot_spacing_mm,
                 slot_density=req.slot_density,
+                minimum_clipped_slot_length_mm=req.minimum_clipped_slot_length_mm,
                 output_dir=req.output_dir,
                 openscad=req.openscad,
                 dry_run=req.dry_run,
@@ -215,6 +218,7 @@ def main(argv=None):
                     slot_width_mm=req.slot_width_mm,
                     slot_spacing_mm=req.slot_spacing_mm,
                     slot_density=req.slot_density,
+                    minimum_clipped_slot_length_mm=req.minimum_clipped_slot_length_mm,
                     output_dir=req.output_dir,
                     openscad=req.openscad,
                     dry_run=req.dry_run,
