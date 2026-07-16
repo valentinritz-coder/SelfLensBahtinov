@@ -1,0 +1,18 @@
+{
+  "manufacturer": "Fujifilm",
+  "model": "Fujinon XF100-400mmF4.5-5.6 R LM OIS WR",
+  "slug": "fujifilm-xf100-400",
+  "filter_thread_mm": 77.0,
+  "focal_length_min_mm": 100.0,
+  "focal_length_max_mm": 400.0,
+  "aperture_min": 4.5,
+  "aperture_max": 5.6,
+  "hood_outer_diameter_mm": null,
+  "barrel_outer_diameter_mm": null,
+  "mount_type": "filter_thread",
+  "fit_clearance_mm": 0.35,
+  "mask_thickness_mm": 2.0,
+  "ring_depth_mm": 8.0,
+  "label": "XF100-400 77mm",
+  "notes": "TODO: Measure hood_outer_diameter_mm and barrel_outer_diameter_mm before using hood_outer or barrel_outer mounting. Filter thread is known to be 77 mm."
+}
