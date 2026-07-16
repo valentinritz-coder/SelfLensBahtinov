@@ -411,7 +411,7 @@ def test_configurable_bahtinov_grating_dimensions():
     )
     assert g.slot_width_mm == pytest.approx(1.1)
     assert g.slot_spacing_mm == pytest.approx(2.5)
-    assert len(g.slots) > 70
+    assert len(g.slots) > 65
 
 
 def test_slot_width_must_be_smaller_than_effective_pitch():
@@ -1112,3 +1112,101 @@ def test_algorithm_options_rejects_missing_mount():
             pattern_border_mm=3.0,
             label=True,
         )
+
+
+def test_clipped_slot_filter_snapshot_for_xf100_400_profile():
+    g = calculate_mask(prof(), opts())
+    assert {r.value: sum(1 for s in g.slots if s.region is r) for r in {s.region for s in g.slots}} == {
+        "left-reference": 17,
+        "right-upper": 10,
+        "right-lower": 10,
+    }
+    assert min(s.useful_length_mm for s in g.slots) == pytest.approx(8.0189)
+
+
+def test_clipped_slot_filter_retains_arc_and_diagonal_slots_but_rejects_tiny_fragments():
+    disabled = calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "minimum_clipped_slot_length_mm": 0.0}))
+    filtered = calculate_mask(prof(), opts())
+
+    assert len(disabled.slots) > len(filtered.slots)
+    assert any(s.useful_length_mm == pytest.approx(0.0) for s in disabled.slots)
+    assert all(s.useful_length_mm >= max(2 * s.width_mm, 4.0) for s in filtered.slots)
+
+    # Long slots with circular aperture ends and diagonal region clipping remain.
+    assert any(s.region is GratingRegion.LEFT_REFERENCE and s.useful_length_mm > 30 for s in filtered.slots)
+    assert any(s.region is GratingRegion.RIGHT_UPPER and s.useful_length_mm > 20 for s in filtered.slots)
+
+    # The decision is not based on the original candidate rectangle length.
+    assert {s.length_mm for s in disabled.slots} == {s.length_mm for s in filtered.slots}
+    assert len([s for s in disabled.slots if s.length_mm > 80 and s.useful_length_mm < 4.0]) > 0
+
+
+def test_clipped_slot_threshold_changes_marginal_slots_and_keeps_regions_non_empty():
+    base = calculate_mask(prof(), opts())
+    stricter = calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "minimum_clipped_slot_length_mm": 10.0}))
+    assert len(stricter.slots) < len(base.slots)
+    assert {s for s in stricter.slots}.issubset(set(base.slots))
+    assert {s.region for s in stricter.slots} == {
+        GratingRegion.LEFT_REFERENCE,
+        GratingRegion.RIGHT_UPPER,
+        GratingRegion.RIGHT_LOWER,
+    }
+    assert len(set(stricter.slots)) == len(stricter.slots)
+    assert calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "minimum_clipped_slot_length_mm": 10.0})).slots == stricter.slots
+
+
+def test_clipped_slot_threshold_zero_disables_filter_and_invalid_values_are_rejected():
+    unfiltered = calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "minimum_clipped_slot_length_mm": 0.0}))
+    filtered = calculate_mask(prof(), opts())
+    assert len(unfiltered.slots) > len(filtered.slots)
+    assert min(s.useful_length_mm for s in unfiltered.slots) == pytest.approx(0.0)
+
+    for bad in (float("nan"), float("inf"), -0.1):
+        with pytest.raises(ValueError, match="minimum_clipped_slot_length_mm"):
+            calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "minimum_clipped_slot_length_mm": bad}))
+    with pytest.raises(ValueError, match="required grating region"):
+        calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "minimum_clipped_slot_length_mm": 1000.0}))
+
+
+def test_all_export_formats_use_same_filtered_slot_set_and_test_ring_is_unchanged(tmp_path):
+    req = request(tmp_path, (OutputFormat.SCAD,))
+    normal = generate(req)
+    scad = normal[0].read_text(encoding="utf-8")
+    geom = calculate_mask(prof(), opts())
+    assert scad.count("clipped_slot(") == len(geom.slots) + 1  # includes module definition
+
+    ring_req = GenerationRequest(**{**req.__dict__, "minimum_clipped_slot_length_mm": 1000.0})
+    ring = generate(ring_req, test_ring=True)[0].read_text(encoding="utf-8")
+    assert "clipped_slot" not in ring
+    assert "test_ring_depth_mm=4.000" in ring
+
+
+def test_tribahtinov_topology_is_unchanged_by_clipped_slot_filter_option():
+    tri_default = calculate_mask(prof(), opts(mt=MaskType.TRIBAHTINOV))
+    tri_strict = calculate_mask(
+        prof(),
+        AlgorithmOptions(**{**opts(mt=MaskType.TRIBAHTINOV).__dict__, "minimum_clipped_slot_length_mm": 1000.0}),
+    )
+    assert tri_default == tri_strict
+    assert len({s.region for s in tri_default.slots}) == 6
+
+
+def test_scad_stl_and_3mf_exports_share_filtered_scad_slot_set(monkeypatch, tmp_path):
+    exported = []
+
+    monkeypatch.setattr("selflensbahtinov.generator.supports_format", lambda openscad, fmt: True)
+
+    def fake_export(openscad, scad_path, out, dry_run=False):
+        exported.append((scad_path.read_text(encoding="utf-8"), out.suffix))
+        out.write_text("exported", encoding="utf-8")
+
+    monkeypatch.setattr("selflensbahtinov.generator.export", fake_export)
+    req = request(tmp_path, (OutputFormat.SCAD, OutputFormat.STL, OutputFormat.THREEMF))
+    outputs = generate(req)
+    scad = outputs[0].read_text(encoding="utf-8")
+    expected_slots = len(calculate_mask(prof(), opts()).slots)
+    assert scad.count("clipped_slot(") == expected_slots + 1
+    assert [(text.count("clipped_slot("), suffix) for text, suffix in exported] == [
+        (expected_slots + 1, ".stl"),
+        (expected_slots + 1, ".3mf"),
+    ]
