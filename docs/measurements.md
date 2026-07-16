@@ -1,26 +1,27 @@
-# Measurements required
+# Lens and hood measurements
 
-SelfLensBahtinov intentionally avoids invented lens dimensions. Measure each lens/hood with calipers before generating a hood or barrel mounted mask.
+SelfLensBahtinov does not invent physical dimensions. Use digital calipers and measure in at least three rotational orientations. Record the largest value for outside slip-fit diameters, because the printed ring must clear the largest point.
 
-## Required for all masks
+## Hood outer diameter
 
-- Confirm the filter thread diameter printed on the lens or lens cap.
-- Choose the intended mount type: `filter_thread`, `hood_outer`, or `barrel_outer`.
-- Measure printer/material fit and tune `fit_clearance_mm` with a test ring.
+Measure the outside diameter of the lens hood exactly where the mask ring will slide over the hood. Avoid flared, tapered, petal-cut, or textured areas unless that is the intended contact surface. Measure near the front rim and any rearward straight section you might use, then choose a straight cylindrical section with enough depth.
 
-## Required for hood-mounted masks
+## Hood inner diameter
 
-- `hood_outer_diameter_mm`: outside diameter of the hood where the mask will slip over it.
-- Confirm the hood has enough straight wall depth for `ring_depth_mm`.
+Measure the inside diameter of the hood at the same axial location. This is useful for checking that the mask face and clear aperture do not intrude into the optical path or collide with hood geometry. Do not use it as the outside slip-fit diameter.
 
-## Required for barrel-mounted masks
+## Barrel outer diameter
 
-- `barrel_outer_diameter_mm`: outside diameter of the lens barrel at the mounting point.
-- Confirm the mask will not interfere with zoom, focus, aperture rings, switches, or lens extension.
+Measure the outside diameter of the lens barrel at the intended mounting point. Confirm that the selected point does not move during zooming or focusing and does not cover controls, switches, focus rings, aperture rings, or lens extension seams.
 
-## Recommended measurement workflow
+## Usable straight mounting depth
 
-1. Measure the diameter in at least three rotational positions.
-2. Use the largest measured diameter as the profile value.
-3. Generate a `--test-ring` first.
-4. Adjust `fit_clearance_mm` in 0.1 mm increments until the ring slides on securely without forcing.
+Measure the axial length of straight, unobstructed surface available for the ring to grip. This value constrains `ring_depth_mm`. Leave clearance for hood bayonet tabs, lens caps, control rings, and any taper. If the straight section is shorter than the configured ring depth, reduce `ring_depth_mm` before generating the model.
+
+## Recommended workflow
+
+1. Measure each diameter in at least three orientations with digital calipers.
+2. Enter unknown profile dimensions only after measuring them.
+3. Generate a `generate-test-ring` model with the intended mount and clearance.
+4. Print the test ring before the full mask.
+5. Adjust `--clearance` or the profile default in 0.05-0.10 mm increments until the ring slips on securely without force.

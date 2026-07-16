@@ -1,24 +1,26 @@
 # SelfLensBahtinov
 
-SelfLensBahtinov is a reproducible, CLI-first generator for 3D-printable Bahtinov focusing masks designed for camera lenses and lens hoods. Geometry is authored in OpenSCAD, while Python loads lens profiles, validates measurements, writes configured `.scad` entrypoints, and optionally invokes OpenSCAD to produce `.stl` files.
+SelfLensBahtinov V1 is a focused, one-developer Python CLI for generating reproducible, printable Bahtinov and TriBahtinov focusing masks for camera lenses. It starts with two local Fujifilm profiles: the Fujinon XF100-400mmF4.5-5.6 R LM OIS WR and Fujinon XF16-80mmF4 R OIS WR.
 
-The initial profiles target:
+Python owns the optical and pattern calculations. OpenSCAD is only the first rendering/export backend: it receives already-calculated slot, aperture, ring, and label geometry and exports SCAD, STL, or 3MF when the installed OpenSCAD supports that format.
 
-- Fujinon XF100-400mmF4.5-5.6 R LM OIS WR, known 77 mm filter thread.
-- Fujinon XF16-80mmF4 R OIS WR, known 72 mm filter thread.
+## Scope
 
-Unmeasured hood and barrel dimensions are intentionally left as `null` with TODO notes.
+V1 supports exactly:
 
-## Features
+- Mask algorithms: Bahtinov and TriBahtinov.
+- Output formats: `.scad`, `.stl`, and `.3mf`.
+- Mount modes: `filter-thread`, `hood-outer`, and `barrel-outer`.
+- Planned-but-not-generated mount mode: `universal-screws`.
+- Local JSON profiles only; there is no database, network registry, plugin system, GUI, slicer automation, or generic CAD framework.
 
-- Python 3.11+ CLI with pathlib-based cross-platform paths.
-- JSON lens profiles with clear validation errors.
-- Parametric OpenSCAD modules for the Bahtinov pattern, mounting ring, full mask, and test ring.
-- Dry-run mode for generation commands.
-- Logging for reproducible batch workflows.
-- Pytest coverage for bundled profiles and validation rules.
+Bahtinov and TriBahtinov are included because they are practical focusing aids for real lens use: Bahtinov masks are simple and robust, while TriBahtinov masks add three-sector diagnostic behavior for collimation/focus interpretation without requiring a broader mask framework.
 
-## Setup
+## Important filter-thread warning
+
+`filter-thread` is a user-facing alias for an internal filter-diameter slip-fit mount. It sizes a plain slip-fit ring from the nominal filter diameter plus clearance. It does **not** model ISO screw threads and should not be described or printed as a threaded filter mount.
+
+## Setup on Windows PowerShell
 
 ```powershell
 git clone <repo-url>
@@ -29,80 +31,91 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-Install OpenSCAD separately and ensure `openscad.exe` is on `PATH`, or pass its location with `--openscad`.
+Install OpenSCAD separately from <https://openscad.org/>. Then verify it is available:
+
+```powershell
+openscad --version
+```
+
+If `openscad.exe` is not on `PATH`, pass it with `--openscad "C:\Program Files\OpenSCAD\openscad.exe"`. STL and 3MF exports are only claimed when OpenSCAD is actually available and supports the requested format; older OpenSCAD builds may not export 3MF.
 
 ## CLI usage
 
-List profiles:
+Search local profiles:
 
 ```powershell
-selflensbahtinov list-profiles
+selflensbahtinov search Fuji
 ```
 
-Validate a bundled profile:
+Show a profile:
+
+```powershell
+selflensbahtinov show fujifilm-xf100-400
+```
+
+Validate a profile:
 
 ```powershell
 selflensbahtinov validate fujifilm-xf100-400
 ```
 
-Generate a configured SCAD file:
+Generate a fit-test ring before printing a full mask:
 
 ```powershell
-selflensbahtinov generate-scad fujifilm-xf16-80 --output generated\xf16-80.scad
+selflensbahtinov generate-test-ring fujifilm-xf16-80 --mount filter-thread --clearance 0.35 --format stl
 ```
 
-Generate a fit test ring STL before printing the full mask:
+Generate Bahtinov SCAD, STL, and 3MF:
 
 ```powershell
-selflensbahtinov generate-stl fujifilm-xf100-400 --test-ring --output generated\xf100-400-test-ring.stl
+selflensbahtinov generate fujifilm-xf100-400 --mask bahtinov --mount filter-thread --format scad --format stl --format 3mf
 ```
 
-Generate the full STL with an explicit OpenSCAD executable path:
+Generate TriBahtinov outputs:
 
 ```powershell
-selflensbahtinov generate-stl fujifilm-xf16-80 --openscad "C:\Program Files\OpenSCAD\openscad.exe" --output generated\xf16-80.stl
+selflensbahtinov generate fujifilm-xf100-400 --mask tribahtinov --mount filter-thread --format scad --format stl --format 3mf
 ```
 
-Preview actions without writing files or running OpenSCAD:
+Generate the V1 bundle: selected full mask plus matching test ring in SCAD/STL and 3MF when supported.
 
 ```powershell
-selflensbahtinov --verbose generate-stl fujifilm-xf100-400 --dry-run
+selflensbahtinov generate-bundle fujifilm-xf16-80 --mask bahtinov --mount filter-thread
 ```
 
-## Measurements required
+Run tests:
 
-Do not use hood or barrel mounting until these values are measured with calipers and entered into the JSON profile:
+```powershell
+pytest
+```
 
-- `hood_outer_diameter_mm`: outside diameter of the lens hood at the mask mounting location.
-- `barrel_outer_diameter_mm`: outside diameter of the lens barrel at the mask mounting location.
-- Confirm the usable straight mounting depth for `ring_depth_mm`.
-- Tune `fit_clearance_mm` for your printer/material using `--test-ring`.
+## Profile model
 
-See [docs/measurements.md](docs/measurements.md) for the recommended workflow.
+Profiles use schema version 1 and strict validation. Unknown fields, invalid enum values, inconsistent focal/aperture ranges, impossible clearances, pattern borders, wall thicknesses, and missing selected mount dimensions are rejected. The two bundled profiles keep unknown hood and barrel dimensions as `null` with TODO notes.
 
-## Profile fields
+The generation flow is:
 
-Profiles live in `profiles/*.json` and include manufacturer, model, slug, filter thread, focal length range, aperture range, optional hood/barrel diameters, mount type, fit clearance, mask thickness, ring depth, label, and notes.
+```text
+LensProfile -> generation options -> MaskAlgorithm -> MaskGeometry -> OpenScadRenderer -> SCAD / STL / 3MF
+```
 
-Supported `mount_type` values:
+The geometry model is deliberately small: `Point2D`, `SlotGeometry`, `RingGeometry`, `LabelGeometry`, and `MaskGeometry`. The clear aperture is the slip-fit inner diameter minus twice `pattern_border_mm`; focal length and f-number only tune the slot width/spacing heuristic.
 
-- `filter_thread`: slip-fit based on the known filter thread diameter.
-- `hood_outer`: slip-fit over a measured hood outside diameter.
-- `barrel_outer`: slip-fit over a measured barrel outside diameter.
+## Measurements and test-ring workflow
 
-## OpenSCAD architecture
+Before using `hood-outer` or `barrel-outer`, edit the profile with real measurements. Print a short test ring first, then adjust clearance in small increments until the fit is secure but not forced. See [docs/measurements.md](docs/measurements.md).
 
-- `openscad/bahtinov_pattern.scad` creates configurable diffraction slots.
-- `openscad/mounting_ring.scad` creates full and test mounting rings.
-- `openscad/lens_mask.scad` composes the mask face, ring, optional engraving, and test ring mode.
+## Current limitations
 
-All dimensions remain parametric so generated files can be reproduced from profiles and CLI options.
+- Filter-thread mode is a slip fit, not a true threaded mount.
+- Hood and barrel dimensions for the bundled lenses are unknown until measured.
+- Universal screw mounting is an enum value only; selecting it returns a clear not-implemented error.
+- 3MF export depends on OpenSCAD capability.
+- The algorithm is intentionally V1-focused and not a general CAD kernel.
 
 ## Roadmap
 
-- Add more lens profiles after physical measurements are available.
-- Add batch generation from a manifest.
-- Add printer/material calibration notes.
-- Add CI for tests and generated SCAD smoke checks.
-- Improve OpenSCAD pattern tuning based on focal length and aperture.
-- Defer any web UI until the CLI and geometry are stable.
+- Add measured hood/barrel dimensions after the user measures them.
+- Add more lens profiles with strict schema validation.
+- Tune mask constants from real printed tests.
+- Consider Hartmann masks, focus targets, STEP, FreeCAD, Fusion 360, or printer/slicer workflows later, but not in V1.
