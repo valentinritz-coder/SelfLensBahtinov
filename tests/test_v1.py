@@ -872,6 +872,96 @@ def test_generate_bundle_real_3mf_fallback_path(monkeypatch, tmp_path):
     assert "fujifilm-xf100-400-test-ring-hood-outer-slip-fit.stl" in outputs
 
 
+
+def _assert_bundle_ring_depth_scad(tmp_path: Path):
+    full = (tmp_path / "fujifilm-xf100-400-bahtinov-lens-barrel-outer-slip-fit.scad").read_text(encoding="utf-8")
+    test_ring = (tmp_path / "fujifilm-xf100-400-test-ring-lens-barrel-outer-slip-fit.scad").read_text(encoding="utf-8")
+
+    assert "ring_depth_mm=70.0000" in full
+    assert "straight_engagement_mm=69.0000" in full
+    assert ", -70.0000]" in full
+
+    assert "test_ring_depth_mm=4.000" in test_ring
+    assert "ring_depth_mm=4.0000" in test_ring
+    assert "straight_engagement_mm=3.0000" in test_ring
+    assert ", -4.0000]" in test_ring
+
+
+def test_generate_bundle_ring_depth_override_reaches_rendered_scad(monkeypatch, tmp_path):
+    import selflensbahtinov.generator as generator
+    import selflensbahtinov.cli as cli
+
+    exported_scad = []
+
+    monkeypatch.setattr(generator, "supports_format", lambda openscad, fmt: True)
+
+    def fake_export(openscad, scad_path, out, dry_run=False):
+        exported_scad.append(scad_path.read_text(encoding="utf-8"))
+        out.write_text("exported", encoding="utf-8")
+
+    monkeypatch.setattr(generator, "export", fake_export)
+    monkeypatch.setattr(cli, "load_profile", lambda path: prof())
+
+    rc = cli.main(
+        [
+            "generate-bundle",
+            "fujifilm-xf100-400",
+            "--mount",
+            "lens-barrel-outer-slip-fit",
+            "--ring-depth",
+            "70",
+            "--output-dir",
+            str(tmp_path),
+            "--openscad",
+            "fake-openscad",
+        ]
+    )
+
+    assert rc == 0
+    _assert_bundle_ring_depth_scad(tmp_path)
+    assert len(exported_scad) == 4
+    assert "ring_depth_mm=70.0000" in exported_scad[0]
+    assert "ring_depth_mm=70.0000" in exported_scad[1]
+    assert "ring_depth_mm=4.0000" in exported_scad[2]
+    assert "ring_depth_mm=4.0000" in exported_scad[3]
+
+
+def test_generate_bundle_ring_depth_override_survives_3mf_fallback_scad(monkeypatch, tmp_path):
+    import selflensbahtinov.generator as generator
+    import selflensbahtinov.cli as cli
+
+    support_calls = []
+
+    def fake_supports_format(openscad, fmt):
+        support_calls.append(fmt)
+        return fmt is not OutputFormat.THREEMF
+
+    def fake_export(openscad, scad_path, out, dry_run=False):
+        out.write_text("exported", encoding="utf-8")
+
+    monkeypatch.setattr(generator, "supports_format", fake_supports_format)
+    monkeypatch.setattr(generator, "export", fake_export)
+    monkeypatch.setattr(cli, "load_profile", lambda path: prof())
+
+    rc = cli.main(
+        [
+            "generate-bundle",
+            "fujifilm-xf100-400",
+            "--mount",
+            "lens-barrel-outer-slip-fit",
+            "--ring-depth",
+            "70",
+            "--output-dir",
+            str(tmp_path),
+            "--openscad",
+            "fake-openscad",
+        ]
+    )
+
+    assert rc == 0
+    assert OutputFormat.THREEMF in support_calls
+    _assert_bundle_ring_depth_scad(tmp_path)
+
 def test_generate_bundle_does_not_treat_stl_failures_as_3mf_fallback(monkeypatch, tmp_path):
     import selflensbahtinov.generator as generator
     import selflensbahtinov.cli as cli

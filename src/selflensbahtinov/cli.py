@@ -1,5 +1,6 @@
 from __future__ import annotations
 import argparse, logging, sys
+from dataclasses import replace
 from pathlib import Path
 from selflensbahtinov.algorithms import DEFAULT_REGION_GAP_MM
 from selflensbahtinov.generator import generate, geometry_for
@@ -187,52 +188,15 @@ def main(argv=None):
                 )
         outputs = []
         if args.cmd == "generate-bundle":
-            req = GenerationRequest(
-                profile=req.profile,
-                mask_type=req.mask_type,
-                mount_type=req.mount_type,
+            req = replace(
+                req,
                 formats=(OutputFormat.SCAD, OutputFormat.STL, OutputFormat.THREEMF),
-                focal_length_mm=req.focal_length_mm,
-                aperture_f_number=req.aperture_f_number,
-                clearance_mm=req.clearance_mm,
-                pattern_border_mm=req.pattern_border_mm,
-                region_gap_mm=req.region_gap_mm,
-                label=req.label,
-                slot_width_mm=req.slot_width_mm,
-                slot_spacing_mm=req.slot_spacing_mm,
-                slot_density=req.slot_density,
-                minimum_clipped_slot_length_mm=req.minimum_clipped_slot_length_mm,
-                lead_in_chamfer_mm=req.lead_in_chamfer_mm,
-                outer_edge_radius_mm=req.outer_edge_radius_mm,
-                output_dir=req.output_dir,
-                openscad=req.openscad,
-                dry_run=req.dry_run,
             )
             try:
                 outputs += generate(req, test_ring=False)
                 outputs += generate(req, test_ring=True)
             except UnsupportedFormatError:
-                req = GenerationRequest(
-                    profile=req.profile,
-                    mask_type=req.mask_type,
-                    mount_type=req.mount_type,
-                    formats=(OutputFormat.SCAD, OutputFormat.STL),
-                    focal_length_mm=req.focal_length_mm,
-                    aperture_f_number=req.aperture_f_number,
-                    clearance_mm=req.clearance_mm,
-                    pattern_border_mm=req.pattern_border_mm,
-                    region_gap_mm=req.region_gap_mm,
-                    label=req.label,
-                    slot_width_mm=req.slot_width_mm,
-                    slot_spacing_mm=req.slot_spacing_mm,
-                    slot_density=req.slot_density,
-                    minimum_clipped_slot_length_mm=req.minimum_clipped_slot_length_mm,
-                    lead_in_chamfer_mm=req.lead_in_chamfer_mm,
-                    outer_edge_radius_mm=req.outer_edge_radius_mm,
-                    output_dir=req.output_dir,
-                    openscad=req.openscad,
-                    dry_run=req.dry_run,
-                )
+                req = replace(req, formats=(OutputFormat.SCAD, OutputFormat.STL))
                 outputs += generate(req)
                 outputs += generate(req, test_ring=True)
         else:
