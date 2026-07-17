@@ -212,6 +212,7 @@ class GenerationRequest:
     aperture_f_number: float
     clearance_mm: float
     pattern_border_mm: float
+    ring_depth_mm: float | None = None
     region_gap_mm: float = 2.0
     label: bool = True
     slot_width_mm: float | None

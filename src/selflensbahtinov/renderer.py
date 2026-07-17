@@ -25,7 +25,7 @@ class OpenScadRenderer(MaskRenderer):
         pts = ", ".join(f"[{p.radius_mm:.4f}, {p.z_mm:.4f}]" for p in g.ring.cross_section)
         return [
             f"// mount_diameter_mm={g.ring.mount_diameter_mm:.4f} clearance_mm={g.ring.clearance_mm:.4f} inner_fit_diameter_mm={g.ring.inner_diameter_mm:.4f}",
-            f"// lead_in_chamfer_mm={g.ring.lead_in_chamfer_mm:.4f} outer_edge_radius_mm={g.ring.outer_edge_radius_mm:.4f} straight_engagement_mm={g.ring.straight_engagement_mm:.4f}",
+            f"// ring_depth_mm={g.ring.depth_mm:.4f} lead_in_chamfer_mm={g.ring.lead_in_chamfer_mm:.4f} outer_edge_radius_mm={g.ring.outer_edge_radius_mm:.4f} straight_engagement_mm={g.ring.straight_engagement_mm:.4f}",
             f"// mounting_entry_side={g.ring.mounting_entry_side}; print with mounting ring on build plate, negative-Z entry side down, no supports.",
             "module mounting_ring() {",
             f"  rotate_extrude(convexity=4) polygon(points=[{pts}]);",

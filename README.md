@@ -31,6 +31,8 @@ Real fit depends on printer calibration, material shrinkage, elephant foot, slic
 
 The production mounting skirt is generated from one Python-owned radial/z cross-section that is rendered to SCAD and then exported to STL and 3MF. The fit-test ring and complete mask use the same mounting cross-section, so a test ring remains a valid mechanical proxy for the final mask.
 
+The axial overlap/engagement length on the lens barrel or hood is controlled by `ring_depth_mm` in a profile and can be overridden during generation with `--ring-depth <mm>`. Fit-test rings intentionally stay short and cap this depth at 4.0 mm, so they validate diameter and edge geometry without printing a full-depth skirt.
+
 Two manufacturing/ergonomic defaults are applied unless a profile or CLI override changes them:
 
 - `lead_in_chamfer_mm = 1.0`: adds an internal lead-in on the mounting-entry side. The entry side is the negative-Z/bottom side of the mounting skirt: the side first presented to the barrel or hood. The chamfer flares only the entry edge outward; deeper inside the ring the straight cylindrical engagement still uses the nominal slip-fit diameter, so it guides insertion without loosening the final fit. Set `--lead-in-chamfer 0` to disable it.

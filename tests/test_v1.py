@@ -1297,6 +1297,27 @@ def test_cli_overrides_mounting_edge_geometry_and_metadata(capsys, monkeypatch, 
     assert "outer_edge_radius_mm=0.0000" in scad
 
 
+
+def test_ring_depth_override_controls_full_mask_engagement_length():
+    g = calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "ring_depth_mm": 9.5}))
+    assert g.ring.depth_mm == pytest.approx(9.5)
+    assert g.ring.straight_engagement_mm == pytest.approx(8.5)
+
+
+def test_test_ring_depth_override_is_capped_to_short_fit_sample():
+    g = calculate_mask(prof(), AlgorithmOptions(**{**opts(test=True).__dict__, "ring_depth_mm": 9.5, "lead_in_chamfer_mm": 0.5}))
+    assert g.ring.depth_mm == pytest.approx(4.0)
+    assert g.ring.straight_engagement_mm == pytest.approx(3.5)
+
+
+def test_cli_overrides_ring_depth(capsys, monkeypatch, tmp_path):
+    import selflensbahtinov.cli as cli
+    monkeypatch.setattr(cli, "load_profile", lambda path: prof())
+    rc = cli.main(["generate", "fujifilm-xf100-400", "--mount", "lens-barrel-outer-slip-fit", "--ring-depth", "9.5", "--output-dir", str(tmp_path)])
+    assert rc == 0
+    scad = next(tmp_path.glob("*.scad")).read_text(encoding="utf-8")
+    assert "ring_depth_mm=9.5000" in scad
+
 def test_support_free_print_orientation_is_documented_in_metadata():
     scad = OpenScadRenderer().render_scad(calculate_mask(prof(), opts(test=True)))
     assert "negative-Z entry side down" in scad
