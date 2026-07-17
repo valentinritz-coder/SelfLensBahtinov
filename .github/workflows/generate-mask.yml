@@ -49,6 +49,12 @@ on:
         default: "0.35"
         type: string
 
+      region_gap:
+        description: Solid separator-band width in millimetres for normal Bahtinov masks
+        required: true
+        default: "2.0"
+        type: string
+
       slot_width:
         description: Optional slot width in millimetres
         required: false
@@ -65,6 +71,12 @@ on:
         description: Slot density multiplier
         required: true
         default: "1.0"
+        type: string
+
+      minimum_clipped_slot_length:
+        description: Optional minimum useful clipped slot length in millimetres; empty uses automatic default, 0 disables filtering
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -189,7 +201,7 @@ jobs:
           data["mounting"][status_field] = status
 
           # The workflow passes --mount explicitly. Keeping these values null
-          # avoids persisting a temporary measurement as a profile recommendation.
+          # avoids persisting a temporary measurement as a recommendation.
           data["mounting"]["recommended_mount"] = None
           data["defaults"]["mount_type"] = None
 
@@ -227,6 +239,7 @@ jobs:
             --mask "${{ inputs.mask }}"
             --mount "${{ inputs.mount }}"
             --clearance "${{ inputs.clearance }}"
+            --region-gap "${{ inputs.region_gap }}"
             --slot-density "${{ inputs.slot_density }}"
             --output-dir generated
             --openscad "$RUNNER_TEMP/openscad-headless"
@@ -234,11 +247,24 @@ jobs:
           )
 
           if [[ -n "${{ inputs.slot_width }}" ]]; then
-            args+=(--slot-width "${{ inputs.slot_width }}")
+            args+=(
+              --slot-width
+              "${{ inputs.slot_width }}"
+            )
           fi
 
           if [[ -n "${{ inputs.slot_spacing }}" ]]; then
-            args+=(--slot-spacing "${{ inputs.slot_spacing }}")
+            args+=(
+              --slot-spacing
+              "${{ inputs.slot_spacing }}"
+            )
+          fi
+
+          if [[ -n "${{ inputs.minimum_clipped_slot_length }}" ]]; then
+            args+=(
+              --minimum-clipped-slot-length
+              "${{ inputs.minimum_clipped_slot_length }}"
+            )
           fi
 
           selflensbahtinov "${args[@]}"
@@ -253,9 +279,11 @@ jobs:
           Measured diameter: ${{ inputs.mount_diameter }} mm
           Measurement status: ${{ inputs.measurement_status }}
           Radial clearance: ${{ inputs.clearance }} mm
+          Region gap: ${{ inputs.region_gap }} mm
           Slot width: ${{ inputs.slot_width || 'automatic' }}
           Slot spacing: ${{ inputs.slot_spacing || 'automatic' }}
           Slot density: ${{ inputs.slot_density }}
+          Minimum clipped slot length: ${{ inputs.minimum_clipped_slot_length || 'automatic' }}
           Commit: ${{ github.sha }}
           Workflow run: ${{ github.run_number }}
           EOF
