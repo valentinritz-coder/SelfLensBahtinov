@@ -465,8 +465,9 @@ def test_full_mask_scad_preserves_front_face_and_clips_slots():
 
 def test_mounting_cavity_ends_at_z_zero_and_does_not_cross_face():
     scad = OpenScadRenderer().render_scad(calculate_mask(prof(), opts()))
-    assert "translate([0, 0, -8.0000]) difference()" in scad
-    assert "cylinder(h=8.0000 + epsilon, d=82.7000)" in scad
+    assert "mounting_ring();" in scad
+    assert "[-8.0000]" not in scad
+    assert "inner_fit_diameter_mm=82.7000" in scad
     assert (
         "mask_thickness_mm + 2 * epsilon" in scad
     )  # slots, not mounting cavity, cross the face
@@ -988,7 +989,7 @@ def test_test_ring_generation_works_for_each_smooth_mount(mount, expected_diamet
 def test_scad_contains_no_thread_or_screw_geometry():
     scad = OpenScadRenderer().render_scad(calculate_mask(prof(), opts()))
 
-    forbidden = ("thread", "screw", "helix", "linear_extrude(twist", "rotate_extrude")
+    forbidden = ("thread", "screw", "helix", "linear_extrude(twist")
     assert all(term not in scad.lower() for term in forbidden)
 
 
@@ -1210,3 +1211,93 @@ def test_scad_stl_and_3mf_exports_share_filtered_scad_slot_set(monkeypatch, tmp_
         (expected_slots + 1, ".stl"),
         (expected_slots + 1, ".3mf"),
     ]
+
+
+def test_default_mounting_cross_section_has_lead_in_chamfer_and_outer_edge_rounding():
+    g = calculate_mask(prof(), opts())
+    ri = g.ring.inner_diameter_mm / 2
+    ro = g.ring.outer_diameter_mm / 2
+    assert g.ring.lead_in_chamfer_mm == pytest.approx(1.0)
+    assert g.ring.outer_edge_radius_mm == pytest.approx(0.5)
+    assert g.ring.cross_section[0].radius_mm == pytest.approx(ri + 1.0)
+    assert any(p.radius_mm == pytest.approx(ro - 0.5) and p.z_mm == pytest.approx(-g.ring.depth_mm) for p in g.ring.cross_section)
+    assert any(p.radius_mm == pytest.approx(ro) and p.z_mm == pytest.approx(-g.ring.depth_mm + 0.5) for p in g.ring.cross_section)
+    assert g.ring.straight_engagement_mm >= 2.0
+
+
+def test_zero_chamfer_and_zero_radius_disable_mounting_edge_treatments():
+    base = {**opts().__dict__}
+    g = calculate_mask(prof(), AlgorithmOptions(**{**base, "lead_in_chamfer_mm": 0.0, "outer_edge_radius_mm": 0.0}))
+    ri = g.ring.inner_diameter_mm / 2
+    ro = g.ring.outer_diameter_mm / 2
+    assert g.ring.cross_section[0].radius_mm == pytest.approx(ri)
+    assert g.ring.cross_section[1].radius_mm == pytest.approx(ro)
+    assert g.ring.cross_section[1].z_mm == pytest.approx(-g.ring.depth_mm)
+    assert g.ring.straight_engagement_mm == pytest.approx(g.ring.depth_mm)
+
+
+def test_chamfer_preserves_nominal_fit_diameter_and_only_increases_entry():
+    plain = calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "lead_in_chamfer_mm": 0.0}))
+    chamfered = calculate_mask(prof(), opts())
+    assert chamfered.ring.inner_diameter_mm == pytest.approx(plain.ring.inner_diameter_mm)
+    ri = chamfered.ring.inner_diameter_mm / 2
+    assert chamfered.ring.cross_section[0].radius_mm > ri
+    assert [p for p in chamfered.ring.cross_section if p.radius_mm == pytest.approx(ri)]
+
+
+def test_test_ring_and_full_mask_share_mounting_cross_section():
+    full = calculate_mask(prof(), opts())
+    ring = calculate_mask(prof(), opts(test=True))
+    assert full.ring.inner_diameter_mm == pytest.approx(ring.ring.inner_diameter_mm)
+    assert full.ring.clearance_mm == pytest.approx(ring.ring.clearance_mm)
+    assert full.ring.lead_in_chamfer_mm == pytest.approx(ring.ring.lead_in_chamfer_mm)
+    assert full.ring.outer_edge_radius_mm == pytest.approx(ring.ring.outer_edge_radius_mm)
+    assert ring.ring.cross_section == calculate_mask(prof(), opts(test=True)).ring.cross_section
+
+
+@pytest.mark.parametrize("field,bad", [("lead_in_chamfer_mm", -0.1), ("outer_edge_radius_mm", -0.1), ("lead_in_chamfer_mm", float("nan")), ("outer_edge_radius_mm", float("inf"))])
+def test_mounting_edge_parameters_reject_invalid_values(field, bad):
+    with pytest.raises(ValueError, match=field):
+        calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, field: bad}))
+
+
+def test_excessive_chamfer_and_outer_radius_are_rejected():
+    with pytest.raises(ValueError, match="straight engagement"):
+        calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "lead_in_chamfer_mm": 7.0}))
+    with pytest.raises(ValueError, match="wall thickness"):
+        calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "outer_edge_radius_mm": 2.0}))
+    with pytest.raises(ValueError, match="ring height"):
+        calculate_mask(replace(prof(), defaults=replace(prof().defaults, ring_wall_thickness_mm=8.0)), AlgorithmOptions(**{**opts(test=True).__dict__, "outer_edge_radius_mm": 2.1}))
+
+
+def test_renderer_uses_shared_mounting_profile_for_scad_stl_and_3mf_exports(tmp_path, monkeypatch):
+    import selflensbahtinov.generator as generator
+    calls = []
+    monkeypatch.setattr(generator, "supports_format", lambda openscad, fmt: True)
+    def fake_export(openscad, scad_path, out, dry_run=False):
+        calls.append((scad_path.read_text(encoding="utf-8"), out.suffix))
+        out.write_text("ok", encoding="utf-8")
+    monkeypatch.setattr(generator, "export", fake_export)
+    req = request(tmp_path, (OutputFormat.SCAD, OutputFormat.STL, OutputFormat.THREEMF))
+    out = generator.generate(req)
+    scad = (tmp_path / "fujifilm-xf100-400-bahtinov-lens-barrel-outer-slip-fit.scad").read_text(encoding="utf-8")
+    assert "lead_in_chamfer_mm=1.0000" in scad
+    assert "outer_edge_radius_mm=0.5000" in scad
+    assert all("rotate_extrude" in text and "lead_in_chamfer_mm=1.0000" in text for text, _ in calls)
+    assert {p.suffix for p in out} == {".scad", ".stl", ".3mf"}
+
+
+def test_cli_overrides_mounting_edge_geometry_and_metadata(capsys, monkeypatch, tmp_path):
+    import selflensbahtinov.cli as cli
+    monkeypatch.setattr(cli, "load_profile", lambda path: prof())
+    rc = cli.main(["generate", "fujifilm-xf100-400", "--mount", "lens-barrel-outer-slip-fit", "--lead-in-chamfer", "0", "--outer-edge-radius", "0", "--output-dir", str(tmp_path)])
+    assert rc == 0
+    scad = next(tmp_path.glob("*.scad")).read_text(encoding="utf-8")
+    assert "lead_in_chamfer_mm=0.0000" in scad
+    assert "outer_edge_radius_mm=0.0000" in scad
+
+
+def test_support_free_print_orientation_is_documented_in_metadata():
+    scad = OpenScadRenderer().render_scad(calculate_mask(prof(), opts(test=True)))
+    assert "negative-Z entry side down" in scad
+    assert "no supports" in scad
