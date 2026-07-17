@@ -62,6 +62,7 @@ NEST = {
         "engrave_label",
         "lead_in_chamfer_mm",
         "outer_edge_radius_mm",
+        "outer_face_fillet_radius_mm",
     },
 }
 
@@ -104,7 +105,7 @@ def migrate_profile_data(data: dict[str, Any], source: Path | None = None) -> di
     p = f"{source}: " if source else ""
     if version == CURRENT_SCHEMA_VERSION:
         if "defaults" in data:
-            data = {**data, "defaults": {"lead_in_chamfer_mm": 1.0, "outer_edge_radius_mm": 0.5, **data["defaults"]}}
+            data = {**data, "defaults": {"lead_in_chamfer_mm": 1.0, "outer_edge_radius_mm": 0.5, "outer_face_fillet_radius_mm": 0.0, **data["defaults"]}}
         return data
     if version != 1:
         raise ProfileValidationError(
@@ -135,7 +136,7 @@ def migrate_profile_data(data: dict[str, Any], source: Path | None = None) -> di
         "hood_inner_status": migrated_status(old_value("hood_inner_diameter_mm")),
         "recommended_mount": None,
     }
-    migrated["defaults"] = {**old_defaults, "mount_type": None, "lead_in_chamfer_mm": 1.0, "outer_edge_radius_mm": 0.5}
+    migrated["defaults"] = {**old_defaults, "mount_type": None, "lead_in_chamfer_mm": 1.0, "outer_edge_radius_mm": 0.5, "outer_face_fillet_radius_mm": 0.0}
     return migrated
 
 
@@ -208,7 +209,7 @@ def validate_profile_data(data: dict[str, Any], source: Path | None = None) -> N
         "pattern_border_mm",
     ):
         _num(de[k], p + "defaults." + k)
-    for k in ("lead_in_chamfer_mm", "outer_edge_radius_mm"):
+    for k in ("lead_in_chamfer_mm", "outer_edge_radius_mm", "outer_face_fillet_radius_mm"):
         _num(de[k], p + "defaults." + k, positive=False)
         if de[k] < 0:
             raise ProfileValidationError(p + f"defaults.{k} must be greater than or equal to zero")
@@ -277,6 +278,7 @@ def profile_from_dict(d: dict[str, Any]) -> LensProfile:
             d["defaults"]["engrave_label"],
             d["defaults"]["lead_in_chamfer_mm"],
             d["defaults"]["outer_edge_radius_mm"],
+            d["defaults"]["outer_face_fillet_radius_mm"],
         ),
         d["label"],
         tuple(d["notes"]),

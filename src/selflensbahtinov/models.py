@@ -77,6 +77,7 @@ class ProfileDefaults:
     engrave_label: bool
     lead_in_chamfer_mm: float = 1.0
     outer_edge_radius_mm: float = 0.5
+    outer_face_fillet_radius_mm: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,7 @@ class LabelGeometry:
     position: Point2D
     size_mm: float
     angle_deg: float
+    reserved_width_mm: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -200,6 +202,7 @@ class MaskGeometry:
     label: LabelGeometry | None
     grating: GratingMetadata | None
     test_ring: bool = False
+    outer_face_fillet_radius_mm: float = 0.0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -224,6 +227,7 @@ class GenerationRequest:
     minimum_clipped_slot_length_mm: float | None = None
     lead_in_chamfer_mm: float = 1.0
     outer_edge_radius_mm: float = 0.5
+    outer_face_fillet_radius_mm: float = 0.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.mount_type, MountType):

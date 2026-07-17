@@ -34,7 +34,12 @@ DEFAULT_REGION_GAP_MM = 2.0
 CIRCLE_CLIP_SEGMENTS = 256
 DEFAULT_LEAD_IN_CHAMFER_MM = 1.0
 DEFAULT_OUTER_EDGE_RADIUS_MM = 0.5
+DEFAULT_OUTER_FACE_FILLET_RADIUS_MM = 0.0
 MIN_STRAIGHT_ENGAGEMENT_MM = 2.0
+LABEL_SIZE_MM = 3.0
+LABEL_WIDTH_FACTOR = 0.75
+LABEL_SAFETY_MARGIN_MM = 0.1
+MIN_POSITIVE_OUTER_FACE_FILLET_RADIUS_MM = 0.0001
 
 
 Polygon = tuple[Point2D, ...]
@@ -58,6 +63,7 @@ class AlgorithmOptions:
     minimum_clipped_slot_length_mm: float | None = None
     lead_in_chamfer_mm: float = DEFAULT_LEAD_IN_CHAMFER_MM
     outer_edge_radius_mm: float = DEFAULT_OUTER_EDGE_RADIUS_MM
+    outer_face_fillet_radius_mm: float = DEFAULT_OUTER_FACE_FILLET_RADIUS_MM
 
     def __post_init__(self) -> None:
         if not isinstance(self.mount_type, MountType):
@@ -436,6 +442,38 @@ def _grating_slots(
     return tuple(slots)
 
 
+
+def _outer_face_fillet_radius(ring: RingGeometry, thickness_mm: float, clear_aperture_mm: float, options: AlgorithmOptions) -> float:
+    requested = options.outer_face_fillet_radius_mm
+    _validate_finite("outer_face_fillet_radius_mm", requested)
+    if requested < 0:
+        raise ValueError("outer_face_fillet_radius_mm must be greater than or equal to zero")
+    if options.test_ring:
+        return 0.0
+    if requested == 0:
+        return 0.0
+    if requested < MIN_POSITIVE_OUTER_FACE_FILLET_RADIUS_MM:
+        raise ValueError(
+            f"outer_face_fillet_radius_mm={requested:.6f} mm is too small to serialize safely; use 0 to disable it or at least {MIN_POSITIVE_OUTER_FACE_FILLET_RADIUS_MM:.4f} mm"
+        )
+    outer_radius = ring.outer_diameter_mm / 2
+    useful_radius = clear_aperture_mm / 2
+    radial_available = outer_radius - useful_radius
+    if options.label:
+        radial_available -= LABEL_SIZE_MM + LABEL_SAFETY_MARGIN_MM
+    max_radius = round(min(thickness_mm, radial_available), 4)
+    if max_radius <= 0:
+        raise ValueError("outer_face_fillet_radius_mm cannot be applied because no printable front-face rim remains")
+    if requested > max_radius:
+        constraints = "front-face thickness, outer diameter, useful aperture"
+        if options.label:
+            constraints += ", and label clearance"
+        raise ValueError(
+            f"outer_face_fillet_radius_mm={requested:.4f} mm exceeds maximum {max_radius:.4f} mm "
+            f"for the current {constraints}"
+        )
+    return round(requested, 4)
+
 def _base(
     profile: LensProfile,
     options: AlgorithmOptions,
@@ -448,6 +486,7 @@ def _base(
         raise ValueError("pattern_border_mm leaves no usable clear aperture")
     if clear_aperture > ring.inner_diameter_mm:
         raise ValueError("clear aperture cannot exceed ring inner diameter")
+    outer_face_fillet = _outer_face_fillet_radius(ring, profile.defaults.mask_thickness_mm, clear_aperture, options)
     if options.test_ring:
         model = None
         metadata = None
@@ -483,11 +522,27 @@ def _base(
         )
     label = None
     if options.label and not options.test_ring:
-        label_radius = clear_aperture / 2 + max(
+        label_half_height = LABEL_SIZE_MM / 2
+        reserved_width = round(len(profile.label) * LABEL_SIZE_MM * LABEL_WIDTH_FACTOR, 4)
+        label_half_width = reserved_width / 2
+        default_label_radius = clear_aperture / 2 + max(
             1.0, (ring.outer_diameter_mm - clear_aperture) / 4
         )
+        useful_radius = clear_aperture / 2
+        min_label_radius = useful_radius + LABEL_SAFETY_MARGIN_MM + label_half_height
+        safe_top_radius = ring.outer_diameter_mm / 2 - outer_face_fillet - LABEL_SAFETY_MARGIN_MM
+        if safe_top_radius <= label_half_width:
+            raise ValueError(
+                f"outer_face_fillet_radius_mm={outer_face_fillet:.4f} mm leaves no safe radial space for the label; use --no-label"
+            )
+        max_label_radius = math.sqrt(safe_top_radius**2 - label_half_width**2) - label_half_height
+        if max_label_radius < min_label_radius:
+            raise ValueError(
+                f"outer_face_fillet_radius_mm={outer_face_fillet:.4f} mm leaves no safe radial space for the label; use --no-label"
+            )
+        label_radius = min(default_label_radius, max_label_radius)
         label = LabelGeometry(
-            profile.label, Point2D(0, round(-label_radius, 4)), 3.0, 0
+            profile.label, Point2D(0, round(-label_radius, 4)), LABEL_SIZE_MM, 0, reserved_width
         )
     return MaskGeometry(
         profile_slug=profile.slug,
@@ -503,6 +558,7 @@ def _base(
         grating=metadata,
         region_gap_mm=region_gap,
         test_ring=options.test_ring,
+        outer_face_fillet_radius_mm=outer_face_fillet,
     )
 
 
