@@ -142,6 +142,25 @@ Profiles use schema version 2 and strict validation. Mounting dimensions are exp
 
 Unknown dimensions remain `null` with status `unknown`. A non-null dimension may be `estimated`, `measured`, or `verified`; `estimated` can be used for test-ring generation only, while `measured` and `verified` can be used for full masks. `recommended_mount` and `defaults.mount_type` may only point to a dimension whose status is `measured` or `verified`. `recommended_mount` means physically recommended and measured, not merely preferred in theory. `verified` means the fit has been physically tested with a printed ring on the actual lens or hood. Selecting a mount whose required physical dimension is `null` fails clearly. Deprecated schema-version-1 profiles are migrated to the version-2 in-memory model with old filter-thread recommendations/defaults cleared rather than treated as real barrel measurements.
 
+### Front-face outer fillet
+
+Use `--outer-face-fillet-radius <mm>` to add a rounded circular fillet to the outside edge where the slotted front face meets the mask outside diameter. The default is `0.0`, which disables the feature and preserves the existing geometry. A positive value removes material inside the requested nominal outside diameter; it does not enlarge the mask, change the mounting fit diameters, reduce the useful optical aperture, or round individual grating slots. Fit-test rings do not include the full slotted front face, so this front-face fillet is only applied to complete masks.
+
+Validation rejects negative or non-finite radii and radii larger than the available front-face thickness or radial rim between the outside diameter and useful aperture.
+
+Example with an 8.0 mm skirt depth and a 1.0 mm outside front-face fillet:
+
+```powershell
+selflensbahtinov generate fujifilm-xf100-400 `
+  --mount lens-barrel-outer-slip-fit `
+  --clearance 0.35 `
+  --ring-depth 8.0 `
+  --outer-face-fillet-radius 1.0 `
+  --format scad `
+  --format stl `
+  --format 3mf
+```
+
 The generation flow is:
 
 ```text

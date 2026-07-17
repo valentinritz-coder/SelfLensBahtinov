@@ -42,6 +42,7 @@ def geometry_for(req: GenerationRequest, test_ring: bool = False):
             minimum_clipped_slot_length_mm=req.minimum_clipped_slot_length_mm,
             lead_in_chamfer_mm=req.lead_in_chamfer_mm,
             outer_edge_radius_mm=req.outer_edge_radius_mm,
+            outer_face_fillet_radius_mm=req.outer_face_fillet_radius_mm,
         ),
     )
 

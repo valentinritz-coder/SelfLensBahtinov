@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import struct
+import zipfile
 from dataclasses import replace
 import shutil
 import subprocess
@@ -11,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from selflensbahtinov.algorithms import AlgorithmOptions, calculate_mask
-from selflensbahtinov.generator import generate, openscad_command_for
+from selflensbahtinov.generator import generate, geometry_for, openscad_command_for
 from selflensbahtinov.models import GenerationRequest, GratingRegion, MaskType, MountType, OutputFormat
 from selflensbahtinov.openscad import (
     OpenScadError,
@@ -291,6 +293,36 @@ def test_github_action_mount_has_no_misleading_default():
     assert "- barrel-outer\n" not in mount_block
     assert '--mount "${{ inputs.mount }}"' in workflow
 
+
+
+def test_github_action_exposes_outer_face_fillet_without_physical_default():
+    workflow = Path(".github/workflows/generate-mask.yml").read_text(encoding="utf-8")
+    input_block = (
+        workflow
+        .split("      outer_face_fillet_radius:", 1)[1]
+        .split("      region_gap:", 1)[0]
+    )
+    assert "Optional fillet radius on the outside edge of the slotted front face" in input_block
+    assert "required: false" in input_block
+    assert 'default: ""' in input_block
+    assert "type: string" in input_block
+
+
+def test_github_action_passes_outer_face_fillet_and_records_metadata():
+    workflow = Path(".github/workflows/generate-mask.yml").read_text(encoding="utf-8")
+    assert 'if [[ -n "${{ inputs.outer_face_fillet_radius }}" ]]; then' in workflow
+    assert "--outer-face-fillet-radius" in workflow
+    assert '"${{ inputs.outer_face_fillet_radius }}"' in workflow
+    assert "Outer front-face fillet radius: ${{ inputs.outer_face_fillet_radius || 'profile default' }}" in workflow
+    assert "outer_face_fillet_radius_mm=" in workflow
+
+
+def test_github_action_keeps_zero_outer_face_fillet_as_explicit_value():
+    workflow = Path(".github/workflows/generate-mask.yml").read_text(encoding="utf-8")
+    assert 'if [[ -n "${{ inputs.outer_face_fillet_radius }}" ]]; then' in workflow
+    conditional = workflow.split('if [[ -n "${{ inputs.outer_face_fillet_radius }}" ]]; then', 1)[1].split("          fi", 1)[0]
+    assert "!= 0" not in conditional
+    assert "profile default" not in conditional
 
 def test_search_local_profiles():
     assert [p.slug for p in search_profiles("Fuji")] == [
@@ -1412,3 +1444,266 @@ def test_support_free_print_orientation_is_documented_in_metadata():
     scad = OpenScadRenderer().render_scad(calculate_mask(prof(), opts(test=True)))
     assert "negative-Z entry side down" in scad
     assert "no supports" in scad
+
+
+def test_outer_face_fillet_zero_preserves_geometry_and_scad_body():
+    base = calculate_mask(prof(), opts())
+    fillet0 = calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "outer_face_fillet_radius_mm": 0.0}))
+    assert fillet0 == base
+    scad = OpenScadRenderer().render_scad(fillet0)
+    assert "outer_face_fillet_radius_mm=0.0000" in scad
+    assert "outer_face_fillet_cut();" not in scad
+
+
+@pytest.mark.parametrize("radius", [0.5, 1.0, 2.0])
+def test_outer_face_fillet_preserves_functional_dimensions_and_slots(radius):
+    base = calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "label": False}))
+    g = calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "label": False, "outer_face_fillet_radius_mm": radius}))
+    assert g.outer_face_fillet_radius_mm == pytest.approx(radius)
+    assert g.ring.outer_diameter_mm == pytest.approx(base.ring.outer_diameter_mm)
+    assert g.clear_aperture_mm == pytest.approx(base.clear_aperture_mm)
+    assert g.ring.inner_diameter_mm == pytest.approx(base.ring.inner_diameter_mm)
+    assert g.slots == base.slots
+    scad = OpenScadRenderer().render_scad(g)
+    assert f"outer_face_fillet_radius_mm={radius:.4f}" in scad
+    assert "module outer_face_fillet_cut()" in scad
+    assert "outer_face_fillet_cut();" in scad
+    assert "rotate_extrude(convexity=4) polygon" in scad
+
+
+@pytest.mark.parametrize("bad", [-0.1, float("nan"), float("inf")])
+def test_outer_face_fillet_rejects_negative_and_non_finite_values(bad):
+    with pytest.raises(ValueError, match="outer_face_fillet_radius_mm"):
+        calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "outer_face_fillet_radius_mm": bad}))
+
+
+
+def test_outer_face_fillet_rejects_positive_radius_below_serialization_precision():
+    with pytest.raises(ValueError, match="too small to serialize safely"):
+        calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "outer_face_fillet_radius_mm": 0.00001}))
+
+def test_outer_face_fillet_rejects_excessive_radius_with_maximum():
+    with pytest.raises(ValueError, match="outer_face_fillet_radius_mm=99.0000 mm exceeds maximum 2.0000 mm"):
+        calculate_mask(prof(), AlgorithmOptions(**{**opts().__dict__, "outer_face_fillet_radius_mm": 99.0}))
+
+
+def test_outer_face_fillet_cli_reaches_model_metadata_and_grating_info(capsys, monkeypatch, tmp_path):
+    import selflensbahtinov.cli as cli
+
+    monkeypatch.setattr(cli, "load_profile", lambda path: prof())
+    rc = cli.main([
+        "generate",
+        "fujifilm-xf100-400",
+        "--mount",
+        "lens-barrel-outer-slip-fit",
+        "--outer-face-fillet-radius",
+        "1.0",
+        "--show-grating-info",
+        "--output-dir",
+        str(tmp_path),
+    ])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "outer_face_fillet_radius=1.0000mm" in out
+    scad = (tmp_path / "fujifilm-xf100-400-bahtinov-lens-barrel-outer-slip-fit.scad").read_text(encoding="utf-8")
+    assert "outer_face_fillet_radius_mm=1.0000" in scad
+    assert "outer_face_fillet_cut();" in scad
+
+
+def test_outer_face_fillet_shared_scad_for_stl_and_3mf_exports(monkeypatch, tmp_path):
+    import selflensbahtinov.generator as generator
+
+    exported = []
+    monkeypatch.setattr(generator, "supports_format", lambda openscad, fmt: True)
+
+    def fake_export(openscad, scad_path, out, dry_run=False):
+        exported.append((out.suffix, scad_path.read_text(encoding="utf-8")))
+        out.write_text("exported", encoding="utf-8")
+
+    monkeypatch.setattr(generator, "export", fake_export)
+    req = replace(request(tmp_path, (OutputFormat.SCAD, OutputFormat.STL, OutputFormat.THREEMF)), outer_face_fillet_radius_mm=1.0)
+    outputs = generate(req)
+    assert {p.suffix for p in outputs} == {".scad", ".stl", ".3mf"}
+    assert [suffix for suffix, _ in exported] == [".stl", ".3mf"]
+    assert all("outer_face_fillet_radius_mm=1.0000" in scad for _, scad in exported)
+
+
+def test_outer_face_fillet_is_not_applied_to_test_ring_without_front_face():
+    g = calculate_mask(prof(), AlgorithmOptions(**{**opts(test=True).__dict__, "outer_face_fillet_radius_mm": 1.0}))
+    assert g.test_ring
+    assert g.outer_face_fillet_radius_mm == pytest.approx(0.0)
+    assert "outer_face_fillet_radius_mm" not in OpenScadRenderer().render_scad(g)
+
+
+def _orientation(a, b, c):
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+
+def _segments_intersect(a, b, c, d):
+    def sign(x):
+        return (x > 1e-9) - (x < -1e-9)
+
+    o1 = sign(_orientation(a, b, c))
+    o2 = sign(_orientation(a, b, d))
+    o3 = sign(_orientation(c, d, a))
+    o4 = sign(_orientation(c, d, b))
+    return o1 != o2 and o3 != o4
+
+
+@pytest.mark.parametrize("radius", [0.5, 1.0, 2.0])
+def test_outer_face_fillet_cut_profile_is_simple_and_inside_nominal_envelope(radius):
+    from selflensbahtinov.renderer import _outer_face_fillet_cut_profile
+
+    outer_radius = 44.35
+    thickness = 2.0
+    profile = _outer_face_fillet_cut_profile(
+        outer_radius_mm=outer_radius,
+        thickness_mm=thickness,
+        radius_mm=radius,
+        epsilon_mm=0.02,
+    )
+    assert all(math.isfinite(coord) for point in profile for coord in point)
+    assert profile[3] == pytest.approx((outer_radius, thickness - radius), abs=1e-6)
+    assert profile[-1] == pytest.approx((outer_radius - radius, thickness), abs=1e-6)
+    assert all(outer_radius - radius <= r <= outer_radius + 0.02 for r, _z in profile)
+    assert all(thickness - radius <= z <= thickness + 0.02 for _r, z in profile)
+    assert _orientation(profile[0], profile[1], profile[2]) < 0
+
+    closed = profile + (profile[0],)
+    for i, (a, b) in enumerate(zip(closed, closed[1:])):
+        for j, (c, d) in enumerate(zip(closed, closed[1:])):
+            if abs(i - j) <= 1 or {i, j} == {0, len(closed) - 2}:
+                continue
+            assert not _segments_intersect(a, b, c, d)
+
+
+@pytest.mark.parametrize("path", PROFILE_PATHS)
+def test_outer_face_fillet_label_reserved_box_corners_avoid_fillet_and_aperture(path):
+    g = calculate_mask(
+        prof(path),
+        AlgorithmOptions(**{**opts(profile=prof(path)).__dict__, "outer_face_fillet_radius_mm": 1.0}),
+    )
+    assert g.label is not None
+    outer_radius = g.ring.outer_diameter_mm / 2
+    useful_radius = g.clear_aperture_mm / 2
+    label_half_height = g.label.size_mm / 2
+    label_half_width = g.label.reserved_width_mm / 2
+    label_radius = abs(g.label.position.y)
+    safe_top_radius = outer_radius - g.outer_face_fillet_radius_mm - 0.1
+    corners = [
+        (sx * label_half_width, -label_radius + sy * label_half_height)
+        for sx in (-1, 1)
+        for sy in (-1, 1)
+    ]
+    assert all(math.hypot(x, y) <= safe_top_radius for x, y in corners)
+    assert label_radius - label_half_height >= useful_radius + 0.1
+
+
+def _read_stl_vertices(path: Path):
+    data = path.read_bytes()
+    if len(data) >= 84:
+        triangle_count = struct.unpack("<I", data[80:84])[0]
+        expected_size = 84 + triangle_count * 50
+        if expected_size == len(data):
+            vertices = []
+            offset = 84
+            for _ in range(triangle_count):
+                offset += 12
+                for _vertex in range(3):
+                    vertices.append(struct.unpack("<fff", data[offset:offset + 12]))
+                    offset += 12
+                offset += 2
+            return vertices
+
+    vertices = []
+    text = data.decode("utf-8")
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 4 and parts[0] == "vertex":
+            vertices.append(tuple(float(v) for v in parts[1:]))
+    return vertices
+
+
+def _stl_edge_counts(vertices):
+    def key(v):
+        return tuple(round(coord, 5) for coord in v)
+
+    counts = {}
+    for i in range(0, len(vertices), 3):
+        tri = [key(v) for v in vertices[i:i + 3]]
+        for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+            edge = tuple(sorted((a, b)))
+            counts[edge] = counts.get(edge, 0) + 1
+    return counts
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="OpenSCAD is not installed")
+@pytest.mark.parametrize("mount", [MountType.LENS_BARREL_OUTER_SLIP_FIT, MountType.HOOD_INNER_SLIP_FIT])
+@pytest.mark.parametrize("radius", [0.0, 0.5, 1.0, 2.0])
+def test_outer_face_fillet_real_openscad_stl_is_manifold_and_dimensionally_stable(tmp_path, mount, radius):
+    req = replace(
+        request(tmp_path, (OutputFormat.SCAD, OutputFormat.STL)),
+        label=False,
+        mount_type=mount,
+        outer_face_fillet_radius_mm=radius,
+    )
+    g = geometry_for(req)
+    base = geometry_for(replace(req, outer_face_fillet_radius_mm=0.0))
+    outputs = generate(req)
+    stl = next(path for path in outputs if path.suffix == ".stl")
+    assert stl.exists()
+    assert stl.stat().st_size > 0
+
+    vertices = _read_stl_vertices(stl)
+    assert vertices
+    edge_counts = _stl_edge_counts(vertices)
+    assert edge_counts
+    assert all(count == 2 for count in edge_counts.values())
+
+    xs = [v[0] for v in vertices]
+    ys = [v[1] for v in vertices]
+    zs = [v[2] for v in vertices]
+    nominal_outer = g.ring.outer_diameter_mm
+    assert max(max(xs) - min(xs), max(ys) - min(ys)) == pytest.approx(nominal_outer, abs=0.02)
+    assert max(zs) - min(zs) == pytest.approx(g.thickness_mm + g.ring.depth_mm, abs=0.02)
+    assert g.clear_aperture_mm == pytest.approx(base.clear_aperture_mm)
+    assert g.ring.inner_diameter_mm == pytest.approx(base.ring.inner_diameter_mm)
+    assert g.ring.mount_diameter_mm == pytest.approx(base.ring.mount_diameter_mm)
+    assert g.ring.outer_diameter_mm == pytest.approx(base.ring.outer_diameter_mm)
+    assert g.slots == base.slots
+
+    outer_radius = nominal_outer / 2
+    top_z = max(zs)
+    top_radii = [math.hypot(x, y) for x, y, z in vertices if abs(z - top_z) <= 1e-5]
+    fn_tolerance = outer_radius * (1 - math.cos(math.pi / 128))
+    fillet_segments = max(6, min(32, int(max(radius, 0.5) * 12)))
+    fillet_tolerance = max(radius, 0.5) * (1 - math.cos(math.pi / (2 * fillet_segments)))
+    tolerance = max(0.03, fn_tolerance + fillet_tolerance + 0.03)
+    # The global mesh diameter remains nominal because the vertical wall and mounting ring
+    # retain the outside diameter below the front-face fillet tangency.
+    assert max(top_radii) == pytest.approx(outer_radius - radius, abs=tolerance)
+    if radius > 0:
+        tangent_z = g.thickness_mm - radius
+        tangent_radii = [math.hypot(x, y) for x, y, z in vertices if abs(z - tangent_z) <= 0.04]
+        assert tangent_radii
+        assert max(tangent_radii) == pytest.approx(outer_radius, abs=tolerance)
+
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="OpenSCAD is not installed")
+def test_outer_face_fillet_real_3mf_export_is_valid_zip_when_supported(tmp_path):
+    if not supports_format("openscad", OutputFormat.THREEMF):
+        pytest.skip("OpenSCAD does not support 3MF export")
+    req = replace(
+        request(tmp_path, (OutputFormat.THREEMF,)),
+        label=False,
+        outer_face_fillet_radius_mm=1.0,
+    )
+    outputs = generate(req)
+    threemf = next(path for path in outputs if path.suffix == ".3mf")
+    assert threemf.exists()
+    assert threemf.stat().st_size > 0
+    with zipfile.ZipFile(threemf) as archive:
+        names = set(archive.namelist())
+        assert "[Content_Types].xml" in names
+        assert any(name.endswith(".model") for name in names)

@@ -71,6 +71,7 @@ def parser():
         g.add_argument("--minimum-clipped-slot-length", type=float)
         g.add_argument("--lead-in-chamfer", type=float)
         g.add_argument("--outer-edge-radius", type=float)
+        g.add_argument("--outer-face-fillet-radius", type=float)
         lab = g.add_mutually_exclusive_group()
         lab.add_argument("--label", action="store_true")
         lab.add_argument("--no-label", action="store_true")
@@ -135,6 +136,7 @@ def _req(a, prof):
         minimum_clipped_slot_length_mm=a.minimum_clipped_slot_length,
         lead_in_chamfer_mm=a.lead_in_chamfer if a.lead_in_chamfer is not None else prof.defaults.lead_in_chamfer_mm,
         outer_edge_radius_mm=a.outer_edge_radius if a.outer_edge_radius is not None else prof.defaults.outer_edge_radius_mm,
+        outer_face_fillet_radius_mm=a.outer_face_fillet_radius if a.outer_face_fillet_radius is not None else prof.defaults.outer_face_fillet_radius_mm,
         output_dir=a.output_dir,
         openscad=a.openscad,
         dry_run=a.dry_run,
@@ -170,8 +172,12 @@ def main(argv=None):
             print(f"OK: {prof.slug} ({prof.model})")
             return 0
         req = _req(args, prof)
+        full_geometry = None
+        if args.cmd != "generate-test-ring" and (args.show_grating_info or req.outer_face_fillet_radius_mm > 0):
+            full_geometry = geometry_for(req)
         if args.show_grating_info and args.cmd != "generate-test-ring":
-            grating = geometry_for(req).grating
+            geometry = full_geometry or geometry_for(req)
+            grating = geometry.grating
             if grating is not None:
                 print(
                     "grating: "
@@ -184,7 +190,8 @@ def main(argv=None):
                     f"lambda={grating.reference_wavelength_nm:.1f}nm "
                     f"theta={grating.first_order_angle_rad:.8f}rad "
                     f"sensor_offset={grating.first_order_sensor_offset_mm:.6f}mm "
-                    f"source={grating.pitch_selection_source}"
+                    f"source={grating.pitch_selection_source} "
+                    f"outer_face_fillet_radius={geometry.outer_face_fillet_radius_mm:.4f}mm"
                 )
         outputs = []
         if args.cmd == "generate-bundle":
@@ -193,14 +200,19 @@ def main(argv=None):
                 formats=(OutputFormat.SCAD, OutputFormat.STL, OutputFormat.THREEMF),
             )
             try:
-                outputs += generate(req, test_ring=False)
+                outputs += generate(req)
                 outputs += generate(req, test_ring=True)
             except UnsupportedFormatError:
                 req = replace(req, formats=(OutputFormat.SCAD, OutputFormat.STL))
                 outputs += generate(req)
                 outputs += generate(req, test_ring=True)
         else:
-            outputs = generate(req, test_ring=args.cmd == "generate-test-ring")
+            if args.cmd == "generate-test-ring":
+                outputs = generate(req, test_ring=True)
+            else:
+                outputs = generate(req)
+        if full_geometry is not None and full_geometry.outer_face_fillet_radius_mm > 0:
+            LOG.info("outer_face_fillet_radius_mm=%.4f", full_geometry.outer_face_fillet_radius_mm)
         for o in outputs:
             print(("DRY-RUN would create: " if args.dry_run else "created: ") + str(o))
         return 0
