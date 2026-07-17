@@ -49,10 +49,22 @@ on:
         default: "0.35"
         type: string
 
+      lead_in_chamfer:
+        description: Optional internal mounting-entry chamfer in millimetres; empty uses profile default, 0 disables it
+        required: false
+        default: ""
+        type: string
+
+      outer_edge_radius:
+        description: Optional external edge treatment size in millimetres; empty uses profile default, 0 disables it
+        required: false
+        default: ""
+        type: string
+
       region_gap:
         description: Solid separator-band width in millimetres for normal Bahtinov masks
         required: true
-        default: "2.0"
+        default: "3.0"
         type: string
 
       slot_width:
@@ -183,14 +195,18 @@ jobs:
           try:
               diameter_field, status_field = mount_fields[mount]
           except KeyError as exc:
-              raise SystemExit(f"Unsupported mount type: {mount}") from exc
+              raise SystemExit(
+                  f"Unsupported mount type: {mount}"
+              ) from exc
 
           source_path = Path("profiles") / f"{profile_slug}.json"
 
           if not source_path.is_file():
               raise SystemExit(f"Profile not found: {source_path}")
 
-          data = json.loads(source_path.read_text(encoding="utf-8"))
+          data = json.loads(
+              source_path.read_text(encoding="utf-8")
+          )
 
           if data.get("schema_version") != 2:
               raise SystemExit(
@@ -206,7 +222,11 @@ jobs:
           data["defaults"]["mount_type"] = None
 
           output_path.write_text(
-              json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+              json.dumps(
+                  data,
+                  indent=2,
+                  ensure_ascii=False,
+              ) + "\n",
               encoding="utf-8",
           )
 
@@ -246,6 +266,20 @@ jobs:
             --show-grating-info
           )
 
+          if [[ -n "${{ inputs.lead_in_chamfer }}" ]]; then
+            args+=(
+              --lead-in-chamfer
+              "${{ inputs.lead_in_chamfer }}"
+            )
+          fi
+
+          if [[ -n "${{ inputs.outer_edge_radius }}" ]]; then
+            args+=(
+              --outer-edge-radius
+              "${{ inputs.outer_edge_radius }}"
+            )
+          fi
+
           if [[ -n "${{ inputs.slot_width }}" ]]; then
             args+=(
               --slot-width
@@ -267,6 +301,9 @@ jobs:
             )
           fi
 
+          printf 'Command arguments:\n'
+          printf '  %q\n' selflensbahtinov "${args[@]}"
+
           selflensbahtinov "${args[@]}"
 
       - name: Save generation metadata
@@ -279,6 +316,8 @@ jobs:
           Measured diameter: ${{ inputs.mount_diameter }} mm
           Measurement status: ${{ inputs.measurement_status }}
           Radial clearance: ${{ inputs.clearance }} mm
+          Lead-in chamfer: ${{ inputs.lead_in_chamfer || 'profile default' }}
+          Outer edge radius: ${{ inputs.outer_edge_radius || 'profile default' }}
           Region gap: ${{ inputs.region_gap }} mm
           Slot width: ${{ inputs.slot_width || 'automatic' }}
           Slot spacing: ${{ inputs.slot_spacing || 'automatic' }}
@@ -288,9 +327,24 @@ jobs:
           Workflow run: ${{ github.run_number }}
           EOF
 
+      - name: Show generated SCAD mounting metadata
+        shell: bash
+        run: |
+          echo "Mounting geometry recorded in generated SCAD files:"
+
+          grep \
+            --with-filename \
+            --extended-regexp \
+            "mount_diameter_mm=|lead_in_chamfer_mm=|mounting_entry_side=" \
+            generated/*.scad || true
+
       - name: List generated files
         run: |
-          find generated -maxdepth 1 -type f -printf "%f\n" | sort
+          find generated \
+            -maxdepth 1 \
+            -type f \
+            -printf "%f\n" \
+            | sort
 
       - name: Upload generated models
         uses: actions/upload-artifact@v7
