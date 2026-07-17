@@ -60,6 +60,8 @@ NEST = {
         "ring_wall_thickness_mm",
         "pattern_border_mm",
         "engrave_label",
+        "lead_in_chamfer_mm",
+        "outer_edge_radius_mm",
     },
 }
 
@@ -101,6 +103,8 @@ def migrate_profile_data(data: dict[str, Any], source: Path | None = None) -> di
     version = data.get("schema_version")
     p = f"{source}: " if source else ""
     if version == CURRENT_SCHEMA_VERSION:
+        if "defaults" in data:
+            data = {**data, "defaults": {"lead_in_chamfer_mm": 1.0, "outer_edge_radius_mm": 0.5, **data["defaults"]}}
         return data
     if version != 1:
         raise ProfileValidationError(
@@ -131,7 +135,7 @@ def migrate_profile_data(data: dict[str, Any], source: Path | None = None) -> di
         "hood_inner_status": migrated_status(old_value("hood_inner_diameter_mm")),
         "recommended_mount": None,
     }
-    migrated["defaults"] = {**old_defaults, "mount_type": None}
+    migrated["defaults"] = {**old_defaults, "mount_type": None, "lead_in_chamfer_mm": 1.0, "outer_edge_radius_mm": 0.5}
     return migrated
 
 
@@ -204,6 +208,10 @@ def validate_profile_data(data: dict[str, Any], source: Path | None = None) -> N
         "pattern_border_mm",
     ):
         _num(de[k], p + "defaults." + k)
+    for k in ("lead_in_chamfer_mm", "outer_edge_radius_mm"):
+        _num(de[k], p + "defaults." + k, positive=False)
+        if de[k] < 0:
+            raise ProfileValidationError(p + f"defaults.{k} must be greater than or equal to zero")
     if de["fit_clearance_mm"] > 3:
         raise ProfileValidationError(p + "fit clearance is physically implausible")
     if de["pattern_border_mm"] < de["ring_wall_thickness_mm"] / 2:
@@ -267,6 +275,8 @@ def profile_from_dict(d: dict[str, Any]) -> LensProfile:
             d["defaults"]["ring_wall_thickness_mm"],
             d["defaults"]["pattern_border_mm"],
             d["defaults"]["engrave_label"],
+            d["defaults"]["lead_in_chamfer_mm"],
+            d["defaults"]["outer_edge_radius_mm"],
         ),
         d["label"],
         tuple(d["notes"]),

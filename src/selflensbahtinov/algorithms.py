@@ -17,6 +17,7 @@ from selflensbahtinov.models import (
     MountType,
     Point2D,
     RingGeometry,
+    RingCrossSectionPoint,
     SlotGeometry,
 )
 
@@ -31,6 +32,9 @@ REFERENCE_WAVELENGTH_NM = 550.0
 TARGET_SPIKE_OFFSET_AT_SENSOR_MM = 0.060
 DEFAULT_REGION_GAP_MM = 2.0
 CIRCLE_CLIP_SEGMENTS = 256
+DEFAULT_LEAD_IN_CHAMFER_MM = 1.0
+DEFAULT_OUTER_EDGE_RADIUS_MM = 0.5
+MIN_STRAIGHT_ENGAGEMENT_MM = 2.0
 
 
 Polygon = tuple[Point2D, ...]
@@ -51,6 +55,8 @@ class AlgorithmOptions:
     slot_spacing_mm: float | None = None
     slot_density: float = 1.0
     minimum_clipped_slot_length_mm: float | None = None
+    lead_in_chamfer_mm: float = DEFAULT_LEAD_IN_CHAMFER_MM
+    outer_edge_radius_mm: float = DEFAULT_OUTER_EDGE_RADIUS_MM
 
     def __post_init__(self) -> None:
         if not isinstance(self.mount_type, MountType):
@@ -123,8 +129,38 @@ def _ring(profile: LensProfile, options: AlgorithmOptions) -> RingGeometry:
         raise ValueError("pattern_border_mm must be greater than or equal to zero")
     if wall <= 0 or depth <= 0:
         raise ValueError("ring dimensions must be greater than zero")
+    lead = options.lead_in_chamfer_mm
+    radius = options.outer_edge_radius_mm
+    for name, value in (("lead_in_chamfer_mm", lead), ("outer_edge_radius_mm", radius)):
+        _validate_finite(name, value)
+        if value < 0:
+            raise ValueError(f"{name} must be greater than or equal to zero")
+    straight = depth - lead
+    if lead >= depth:
+        raise ValueError("lead_in_chamfer_mm must be smaller than ring_depth_mm")
+    if straight < MIN_STRAIGHT_ENGAGEMENT_MM:
+        raise ValueError(f"lead_in_chamfer_mm leaves less than {MIN_STRAIGHT_ENGAGEMENT_MM:.1f} mm straight engagement")
+    if radius * 2 > wall:
+        raise ValueError("outer_edge_radius_mm is incompatible with ring wall thickness")
+    if radius * 2 > depth:
+        raise ValueError("outer_edge_radius_mm is incompatible with ring height")
     if inner_diameter <= 0 or outer_diameter <= inner_diameter:
         raise ValueError("ring diameters must be valid positive dimensions")
+    ri = inner_diameter / 2
+    ro = outer_diameter / 2
+    # Authoritative radial/z cross-section for the mounting skirt.  Entry is
+    # the negative-Z bottom side; the inner wall flares outward only there.
+    pts = [
+        RingCrossSectionPoint(round(ri + lead, 4), round(-depth, 4)),
+        RingCrossSectionPoint(round(ro - radius, 4), round(-depth, 4)),
+    ]
+    if radius > 0:
+        pts.append(RingCrossSectionPoint(round(ro, 4), round(-depth + radius, 4)))
+    pts.append(RingCrossSectionPoint(round(ro, 4), 0.0))
+    pts.extend([
+        RingCrossSectionPoint(round(ri, 4), 0.0),
+        RingCrossSectionPoint(round(ri, 4), round(-depth + lead, 4)),
+    ])
     return RingGeometry(
         mount_type=options.mount_type,
         mount_diameter_mm=mount_diameter,
@@ -133,6 +169,10 @@ def _ring(profile: LensProfile, options: AlgorithmOptions) -> RingGeometry:
         wall_thickness_mm=wall,
         depth_mm=depth,
         clearance_mm=options.clearance_mm,
+        lead_in_chamfer_mm=lead,
+        outer_edge_radius_mm=radius,
+        straight_engagement_mm=round(straight, 4),
+        cross_section=tuple(pts),
     )
 
 

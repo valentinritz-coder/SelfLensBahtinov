@@ -21,6 +21,17 @@ def _scad_string(value: str) -> str:
 
 
 class OpenScadRenderer(MaskRenderer):
+    def _mounting_module(self, g: MaskGeometry) -> list[str]:
+        pts = ", ".join(f"[{p.radius_mm:.4f}, {p.z_mm:.4f}]" for p in g.ring.cross_section)
+        return [
+            f"// mount_diameter_mm={g.ring.mount_diameter_mm:.4f} clearance_mm={g.ring.clearance_mm:.4f} inner_fit_diameter_mm={g.ring.inner_diameter_mm:.4f}",
+            f"// lead_in_chamfer_mm={g.ring.lead_in_chamfer_mm:.4f} outer_edge_radius_mm={g.ring.outer_edge_radius_mm:.4f} straight_engagement_mm={g.ring.straight_engagement_mm:.4f}",
+            f"// mounting_entry_side={g.ring.mounting_entry_side}; print with mounting ring on build plate, negative-Z entry side down, no supports.",
+            "module mounting_ring() {",
+            f"  rotate_extrude(convexity=4) polygon(points=[{pts}]);",
+            "}",
+        ]
+
     def render_scad(self, geometry: MaskGeometry) -> str:
         if geometry.test_ring:
             return self._render_test_ring(geometry)
@@ -67,15 +78,13 @@ class OpenScadRenderer(MaskRenderer):
             f"// profile={g.profile_slug} mask={g.mask_type.value} clear_aperture_mm={g.clear_aperture_mm:.3f} pattern_border_mm={g.pattern_border_mm:.3f}",
             f"mask_thickness_mm = {g.thickness_mm:.4f};",
             *self._common_modules(g),
+            *self._mounting_module(g),
             "difference() {",
             "  union() {",
             "    // Solid front face. Do not subtract a circular clear-aperture hole.",
             f"    cylinder(h=mask_thickness_mm, d={g.ring.outer_diameter_mm:.4f});",
-            "    // Hollow mounting skirt behind the front face.",
-            f"    translate([0, 0, -{g.ring.depth_mm:.4f}]) difference() {{",
-            f"      cylinder(h={g.ring.depth_mm:.4f}, d={g.ring.outer_diameter_mm:.4f});",
-            f"      translate([0, 0, -epsilon]) cylinder(h={g.ring.depth_mm:.4f} + epsilon, d={g.ring.inner_diameter_mm:.4f});",
-            "    }",
+            "    // Shared Python cross-section mounting skirt: lead-in chamfer and external edge treatment.",
+            "    mounting_ring();",
             "  }",
         ]
         for slot in g.slots:
@@ -99,10 +108,8 @@ class OpenScadRenderer(MaskRenderer):
                 "$fn = 128;",
                 f"epsilon = {_EPSILON:.3f};",
                 f"// test_ring_depth_mm={g.ring.depth_mm:.3f}",
-                "difference() {",
-                f"  translate([0, 0, -{g.ring.depth_mm:.4f}]) cylinder(h={g.ring.depth_mm:.4f}, d={g.ring.outer_diameter_mm:.4f});",
-                f"  translate([0, 0, -{g.ring.depth_mm:.4f} - epsilon]) cylinder(h={g.ring.depth_mm:.4f} + 2 * epsilon, d={g.ring.inner_diameter_mm:.4f});",
-                "}",
+                *self._mounting_module(g),
+                "mounting_ring();",
                 "",
             ]
         )

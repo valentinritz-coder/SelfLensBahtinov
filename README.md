@@ -26,6 +26,41 @@ Clearance is configurable radial clearance in millimetres:
 
 Real fit depends on printer calibration, material shrinkage, elephant foot, slicer settings, surface texture, and measurement accuracy.
 
+
+### Production mounting-ring edge geometry
+
+The production mounting skirt is generated from one Python-owned radial/z cross-section that is rendered to SCAD and then exported to STL and 3MF. The fit-test ring and complete mask use the same mounting cross-section, so a test ring remains a valid mechanical proxy for the final mask.
+
+Two manufacturing/ergonomic defaults are applied unless a profile or CLI override changes them:
+
+- `lead_in_chamfer_mm = 1.0`: adds an internal lead-in on the mounting-entry side. The entry side is the negative-Z/bottom side of the mounting skirt: the side first presented to the barrel or hood. The chamfer flares only the entry edge outward; deeper inside the ring the straight cylindrical engagement still uses the nominal slip-fit diameter, so it guides insertion without loosening the final fit. Set `--lead-in-chamfer 0` to disable it.
+- `outer_edge_radius_mm = 0.5`: applies a deterministic support-free faceted edge treatment to exposed outside skirt edges to remove sharp handling edges and reduce burr/chip sensitivity. Set `--outer-edge-radius 0` to disable it.
+
+Validation rejects non-finite, negative, self-intersecting, or mechanically incompatible values. The lead-in must leave at least 2.0 mm of straight cylindrical engagement and must be smaller than the ring height. The outer edge radius must fit within both the wall thickness and the ring height. The nominal mounting diameter, radial clearance, and resulting internal fit diameter remain separate from both edge-treatment parameters.
+
+Recommended print orientation: place the mounting ring flat on the build plate with the negative-Z mounting-entry side down. This keeps the skirt stable, prints the 45° lead-in without supports, and leaves the diffraction slots in the intended face orientation.
+
+```text
+        external rounded edge
+              ╭──────
+             /       │
+entry  →    /        │  straight cylindrical engagement at nominal fit diameter
+           │         │
+           │         │
+           └─────────┘
+```
+
+CLI example with explicit manufacturing overrides:
+
+```powershell
+selflensbahtinov generate-test-ring fujifilm-xf100-400 `
+  --mount lens-barrel-outer-slip-fit `
+  --clearance 0.35 `
+  --lead-in-chamfer 1.0 `
+  --outer-edge-radius 0.5 `
+  --format stl
+```
+
 ## Setup on Windows PowerShell
 
 ```powershell

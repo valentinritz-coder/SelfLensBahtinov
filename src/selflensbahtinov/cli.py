@@ -67,6 +67,8 @@ def parser():
         g.add_argument("--slot-spacing", type=float)
         g.add_argument("--slot-density", type=float, default=1.0)
         g.add_argument("--minimum-clipped-slot-length", type=float)
+        g.add_argument("--lead-in-chamfer", type=float)
+        g.add_argument("--outer-edge-radius", type=float)
         lab = g.add_mutually_exclusive_group()
         lab.add_argument("--label", action="store_true")
         lab.add_argument("--no-label", action="store_true")
@@ -128,6 +130,8 @@ def _req(a, prof):
         slot_spacing_mm=a.slot_spacing,
         slot_density=a.slot_density,
         minimum_clipped_slot_length_mm=a.minimum_clipped_slot_length,
+        lead_in_chamfer_mm=a.lead_in_chamfer if a.lead_in_chamfer is not None else prof.defaults.lead_in_chamfer_mm,
+        outer_edge_radius_mm=a.outer_edge_radius if a.outer_edge_radius is not None else prof.defaults.outer_edge_radius_mm,
         output_dir=a.output_dir,
         openscad=a.openscad,
         dry_run=a.dry_run,
@@ -196,6 +200,8 @@ def main(argv=None):
                 slot_spacing_mm=req.slot_spacing_mm,
                 slot_density=req.slot_density,
                 minimum_clipped_slot_length_mm=req.minimum_clipped_slot_length_mm,
+                lead_in_chamfer_mm=req.lead_in_chamfer_mm,
+                outer_edge_radius_mm=req.outer_edge_radius_mm,
                 output_dir=req.output_dir,
                 openscad=req.openscad,
                 dry_run=req.dry_run,
@@ -219,6 +225,8 @@ def main(argv=None):
                     slot_spacing_mm=req.slot_spacing_mm,
                     slot_density=req.slot_density,
                     minimum_clipped_slot_length_mm=req.minimum_clipped_slot_length_mm,
+                    lead_in_chamfer_mm=req.lead_in_chamfer_mm,
+                    outer_edge_radius_mm=req.outer_edge_radius_mm,
                     output_dir=req.output_dir,
                     openscad=req.openscad,
                     dry_run=req.dry_run,

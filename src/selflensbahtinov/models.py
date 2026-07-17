@@ -75,6 +75,8 @@ class ProfileDefaults:
     ring_wall_thickness_mm: float
     pattern_border_mm: float
     engrave_label: bool
+    lead_in_chamfer_mm: float = 1.0
+    outer_edge_radius_mm: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,12 @@ class SlotGeometry:
 
 
 @dataclass(frozen=True)
+class RingCrossSectionPoint:
+    radius_mm: float
+    z_mm: float
+
+
+@dataclass(frozen=True)
 class RingGeometry:
     mount_type: MountType
     mount_diameter_mm: float
@@ -144,6 +152,11 @@ class RingGeometry:
     wall_thickness_mm: float
     depth_mm: float
     clearance_mm: float
+    lead_in_chamfer_mm: float = 1.0
+    outer_edge_radius_mm: float = 0.5
+    straight_engagement_mm: float = 0.0
+    mounting_entry_side: str = "bottom/negative-z"
+    cross_section: tuple[RingCrossSectionPoint, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.mount_type, MountType):
@@ -208,6 +221,8 @@ class GenerationRequest:
     openscad: str
     dry_run: bool = False
     minimum_clipped_slot_length_mm: float | None = None
+    lead_in_chamfer_mm: float = 1.0
+    outer_edge_radius_mm: float = 0.5
 
     def __post_init__(self) -> None:
         if not isinstance(self.mount_type, MountType):
