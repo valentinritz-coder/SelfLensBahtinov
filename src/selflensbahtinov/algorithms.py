@@ -48,6 +48,7 @@ class AlgorithmOptions:
     aperture_f_number: float
     clearance_mm: float
     pattern_border_mm: float
+    ring_depth_mm: float | None = None
     region_gap_mm: float = DEFAULT_REGION_GAP_MM
     label: bool = True
     test_ring: bool = False
@@ -106,11 +107,12 @@ def _ring(profile: LensProfile, options: AlgorithmOptions) -> RingGeometry:
         # Lens-barrel and hood-outer slip fits slide over an outside surface.
         inner_diameter = mount_diameter + 2 * options.clearance_mm
         outer_diameter = inner_diameter + 2 * wall
-    depth = (
-        min(profile.defaults.ring_depth_mm, 4.0)
-        if options.test_ring
+    requested_depth = (
+        options.ring_depth_mm
+        if options.ring_depth_mm is not None
         else profile.defaults.ring_depth_mm
     )
+    depth = min(requested_depth, 4.0) if options.test_ring else requested_depth
     for name, value in (
         ("mount_diameter_mm", mount_diameter),
         ("clearance_mm", options.clearance_mm),

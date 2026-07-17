@@ -62,6 +62,7 @@ def parser():
         g.add_argument("--aperture", type=float)
         g.add_argument("--clearance", type=float)
         g.add_argument("--pattern-border", type=float)
+        g.add_argument("--ring-depth", type=float)
         g.add_argument("--region-gap", type=float, default=DEFAULT_REGION_GAP_MM)
         g.add_argument("--slot-width", type=float)
         g.add_argument("--slot-spacing", type=float)
@@ -124,6 +125,7 @@ def _req(a, prof):
             if a.pattern_border is not None
             else prof.defaults.pattern_border_mm
         ),
+        ring_depth_mm=a.ring_depth,
         region_gap_mm=a.region_gap,
         label=False if a.no_label else (True if a.label else prof.defaults.engrave_label),
         slot_width_mm=a.slot_width,
