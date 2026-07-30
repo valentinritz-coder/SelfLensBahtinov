@@ -126,25 +126,39 @@ class ParametricOpenScadRenderer(OpenScadRenderer):
         outer_radius = g.ring.outer_diameter_mm / 2
         tab_center_y = outer_radius + (dims.tab_depth_mm - _LABEL_TAB_OVERLAP_MM) / 2
         pocket_center_y = outer_radius + dims.pocket_depth_mm / 2
-        pocket_floor_z = dims.front_skin_mm
-        pocket_top_z = dims.tab_thickness_mm - dims.rear_rail_mm
+
+        # The slotted Bahtinov face is the positive-Z face of the front plate.
+        # Keep the holder exactly flush with that face and place all extra
+        # thickness toward negative Z, inside the mounting-ring overlap.
+        tab_top_z = g.thickness_mm
+        tab_bottom_z = tab_top_z - dims.tab_thickness_mm
+        tab_center_z = (tab_top_z + tab_bottom_z) / 2
+
+        pocket_top_z = tab_top_z - dims.front_skin_mm
+        pocket_bottom_z = tab_bottom_z + dims.rear_rail_mm
+        pocket_center_z = (pocket_top_z + pocket_bottom_z) / 2
+
         entry_width = max(1.0, dims.pocket_width_mm - 2 * dims.rear_rail_mm)
-        entry_height = pocket_top_z + _EPSILON
+        entry_bottom_z = tab_bottom_z - _EPSILON
+        entry_top_z = pocket_top_z
+        entry_height = entry_top_z - entry_bottom_z
+        entry_center_z = (entry_top_z + entry_bottom_z) / 2
 
         return [
             f"// rear_loading_label_cartridge=true label_text={json.dumps(g.label.text)} tab_width_mm={dims.tab_width_mm:.4f} tab_depth_mm={dims.tab_depth_mm:.4f} tab_thickness_mm={dims.tab_thickness_mm:.4f}",
             f"// label_tab_front_skin_mm={dims.front_skin_mm:.4f} label_tab_side_wall_mm={dims.side_wall_mm:.4f} label_tab_rear_rail_mm={dims.rear_rail_mm:.4f} cartridge_clearance_mm={dims.clearance_mm:.4f}",
+            f"// label_tab_build_face_z_mm={tab_top_z:.4f} label_tab_back_z_mm={tab_bottom_z:.4f}",
             f"// generated_cartridge_width_mm={dims.cartridge_width_mm:.4f} generated_cartridge_depth_mm={dims.cartridge_depth_mm:.4f} generated_cartridge_thickness_mm={dims.cartridge_thickness_mm:.4f}",
             "// Pocket opens opposite the Bahtinov face and at the outer radial end.",
             "module label_cartridge_boss() {",
-            f"  translate([0, {tab_center_y:.4f}, {dims.tab_thickness_mm / 2:.4f}]) cube([{dims.tab_width_mm:.4f}, {dims.tab_depth_mm:.4f}, {dims.tab_thickness_mm:.4f}], center=true);",
+            f"  translate([0, {tab_center_y:.4f}, {tab_center_z:.4f}]) cube([{dims.tab_width_mm:.4f}, {dims.tab_depth_mm:.4f}, {dims.tab_thickness_mm:.4f}], center=true);",
             "}",
             "module label_cartridge_pocket() {",
             "  union() {",
-            "    // Impact-resistant floor remains against the Bahtinov face.",
-            f"    translate([0, {pocket_center_y:.4f}, {pocket_floor_z + dims.pocket_height_mm / 2:.4f}]) cube([{dims.pocket_width_mm:.4f}, {dims.pocket_depth_mm + 2 * _EPSILON:.4f}, {dims.pocket_height_mm:.4f}], center=true);",
-            "    // Narrower rear opening leaves retaining rails.",
-            f"    translate([0, {pocket_center_y + dims.clearance_mm:.4f}, {entry_height / 2 - _EPSILON:.4f}]) cube([{entry_width:.4f}, {dims.pocket_depth_mm + 2 * dims.clearance_mm + 2 * _EPSILON:.4f}, {entry_height + 2 * _EPSILON:.4f}], center=true);",
+            "    // Impact-resistant floor remains directly behind the flush Bahtinov build face.",
+            f"    translate([0, {pocket_center_y:.4f}, {pocket_center_z:.4f}]) cube([{dims.pocket_width_mm:.4f}, {dims.pocket_depth_mm + 2 * _EPSILON:.4f}, {dims.pocket_height_mm:.4f}], center=true);",
+            "    // Negative-Z rear opening leaves retaining rails and never crosses the build-face plane.",
+            f"    translate([0, {pocket_center_y + dims.clearance_mm:.4f}, {entry_center_z:.4f}]) cube([{entry_width:.4f}, {dims.pocket_depth_mm + 2 * dims.clearance_mm + 2 * _EPSILON:.4f}, {entry_height:.4f}], center=true);",
             "  }",
             "}",
         ]
