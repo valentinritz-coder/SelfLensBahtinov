@@ -59,6 +59,18 @@ def test_default_floor_is_thicker_and_cartridge_is_rendered(monkeypatch):
     assert 'text("400mm"' in cartridge_scad
 
 
+def test_holder_is_flush_with_bahtinov_build_face_and_extends_only_rearward():
+    g = geometry()
+    scad = ParametricOpenScadRenderer().render_scad(g)
+
+    # Front plate spans z=0..2 mm. A 3 mm holder must therefore span
+    # z=-1..2 mm, never z=0..3 mm, so the build-plate face remains coplanar.
+    assert "label_tab_build_face_z_mm=2.0000 label_tab_back_z_mm=-1.0000" in scad
+    assert "translate([0, 52.8500, 0.5000]) cube([24.0000, 12.0000, 3.0000]" in scad
+    assert "translate([0, 52.7250, 0.2000]) cube([21.6000, 8.7900, 1.2000]" in scad
+    assert "translate([0, 52.9750, -0.1100]) cube([20.4000, 9.2900, 1.8200]" in scad
+
+
 def test_dimensions_are_configurable(monkeypatch):
     monkeypatch.setenv("SLB_LABEL_TAB_WIDTH_MM", "32")
     monkeypatch.setenv("SLB_LABEL_TAB_DEPTH_MM", "14")
