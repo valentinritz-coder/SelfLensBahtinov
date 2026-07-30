@@ -76,16 +76,22 @@ def generate(req: GenerationRequest, *, test_ring: bool = False) -> list[Path]:
     req.output_dir.mkdir(parents=True, exist_ok=True) if not req.dry_run else None
     renderer = ParametricOpenScadRenderer()
     base = req.output_dir / base_name(req, test_ring)
-    written = _write_formats(req, base, renderer.render_scad(geom))
+    return _write_formats(req, base, renderer.render_scad(geom))
 
-    if not test_ring and geom.label is not None:
-        cartridge_base = req.output_dir / f"{base_name(req)}-label-cartridge"
-        written += _write_formats(
-            req,
-            cartridge_base,
-            renderer.render_label_cartridge_scad(geom),
-        )
-    return written
+
+def generate_label_cartridge(req: GenerationRequest) -> list[Path]:
+    """Generate the removable label insert matching a labelled full mask."""
+    geom = geometry_for(req, test_ring=False)
+    if geom.label is None:
+        return []
+    req.output_dir.mkdir(parents=True, exist_ok=True) if not req.dry_run else None
+    renderer = ParametricOpenScadRenderer()
+    cartridge_base = req.output_dir / f"{base_name(req)}-label-cartridge"
+    return _write_formats(
+        req,
+        cartridge_base,
+        renderer.render_label_cartridge_scad(geom),
+    )
 
 
 def openscad_command_for(
