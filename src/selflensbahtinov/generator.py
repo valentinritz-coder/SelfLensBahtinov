@@ -9,7 +9,7 @@ from selflensbahtinov.openscad import (
     output_path,
     supports_format,
 )
-from selflensbahtinov.renderer import OpenScadRenderer
+from selflensbahtinov.label_cartridge import ParametricOpenScadRenderer
 
 
 def base_name(req: GenerationRequest, test_ring: bool = False) -> str:
@@ -47,18 +47,15 @@ def geometry_for(req: GenerationRequest, test_ring: bool = False):
     )
 
 
-def generate(req: GenerationRequest, *, test_ring: bool = False) -> list[Path]:
-    geom = geometry_for(req, test_ring)
-    req.output_dir.mkdir(parents=True, exist_ok=True) if not req.dry_run else None
-    base = req.output_dir / base_name(req, test_ring)
+def _write_formats(req, base: Path, scad: str) -> list[Path]:
     scad_path = output_path(base, OutputFormat.SCAD)
-    scad = OpenScadRenderer().render_scad(geom)
-    written = []
     need_scad = OutputFormat.SCAD in req.formats or any(
-        f is not OutputFormat.SCAD for f in req.formats
+        fmt is not OutputFormat.SCAD for fmt in req.formats
     )
     if need_scad and not req.dry_run:
         scad_path.write_text(scad, encoding="utf-8")
+
+    written = []
     if OutputFormat.SCAD in req.formats:
         written.append(scad_path)
     for fmt in req.formats:
@@ -71,6 +68,23 @@ def generate(req: GenerationRequest, *, test_ring: bool = False) -> list[Path]:
         out = output_path(base, fmt)
         export(req.openscad, scad_path, out, req.dry_run)
         written.append(out)
+    return written
+
+
+def generate(req: GenerationRequest, *, test_ring: bool = False) -> list[Path]:
+    geom = geometry_for(req, test_ring)
+    req.output_dir.mkdir(parents=True, exist_ok=True) if not req.dry_run else None
+    renderer = ParametricOpenScadRenderer()
+    base = req.output_dir / base_name(req, test_ring)
+    written = _write_formats(req, base, renderer.render_scad(geom))
+
+    if not test_ring and geom.label is not None:
+        cartridge_base = req.output_dir / f"{base_name(req)}-label-cartridge"
+        written += _write_formats(
+            req,
+            cartridge_base,
+            renderer.render_label_cartridge_scad(geom),
+        )
     return written
 
 
