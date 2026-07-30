@@ -9,6 +9,14 @@ from abc import ABC, abstractmethod
 from selflensbahtinov.models import MaskGeometry
 
 _EPSILON = 0.02
+_LABEL_TAB_MIN_WIDTH_MM = 24.0
+_LABEL_TAB_TEXT_PADDING_MM = 8.0
+_LABEL_TAB_RADIAL_DEPTH_MM = 12.0
+_LABEL_TAB_OVERLAP_MM = 3.0
+_LABEL_TAB_SIDE_WALL_MM = 1.2
+_LABEL_TAB_FRONT_SKIN_MM = 0.6
+_LABEL_TAB_REAR_RAIL_MM = 0.6
+_LABEL_CARTRIDGE_CLEARANCE_MM = 0.25
 
 
 class MaskRenderer(ABC):
@@ -44,6 +52,7 @@ def _outer_face_fillet_cut_profile(
         *arc,
     )
 
+
 def _scad_string(value: str) -> str:
     return json.dumps(value)
 
@@ -54,12 +63,64 @@ class OpenScadRenderer(MaskRenderer):
         return [
             f"// mount_diameter_mm={g.ring.mount_diameter_mm:.4f} clearance_mm={g.ring.clearance_mm:.4f} inner_fit_diameter_mm={g.ring.inner_diameter_mm:.4f}",
             f"// ring_depth_mm={g.ring.depth_mm:.4f} lead_in_chamfer_mm={g.ring.lead_in_chamfer_mm:.4f} outer_edge_radius_mm={g.ring.outer_edge_radius_mm:.4f} straight_engagement_mm={g.ring.straight_engagement_mm:.4f}",
-            f"// mounting_entry_side={g.ring.mounting_entry_side}; print with mounting ring on build plate, negative-Z entry side down, no supports.",
+            f"// mounting_entry_side={g.ring.mounting_entry_side}; print with the slotted Bahtinov face on the build plate and the negative-Z mounting side facing upward.",
             "module mounting_ring() {",
             f"  rotate_extrude(convexity=4) polygon(points=[{pts}]);",
             "}",
         ]
 
+    def _label_cartridge_modules(self, g: MaskGeometry) -> list[str]:
+        if g.label is None:
+            return [
+                "module label_cartridge_boss() {}",
+                "module label_cartridge_pocket() {}",
+            ]
+
+        outer_radius = g.ring.outer_diameter_mm / 2
+        tab_width = max(
+            _LABEL_TAB_MIN_WIDTH_MM,
+            g.label.reserved_width_mm + _LABEL_TAB_TEXT_PADDING_MM,
+        )
+        tab_center_y = (
+            outer_radius
+            + (_LABEL_TAB_RADIAL_DEPTH_MM - _LABEL_TAB_OVERLAP_MM) / 2
+        )
+        pocket_width = tab_width - 2 * _LABEL_TAB_SIDE_WALL_MM
+        pocket_depth = (
+            _LABEL_TAB_RADIAL_DEPTH_MM
+            - _LABEL_TAB_OVERLAP_MM
+            - _LABEL_CARTRIDGE_CLEARANCE_MM
+        )
+        pocket_center_y = outer_radius + pocket_depth / 2
+        pocket_floor_z = _LABEL_TAB_FRONT_SKIN_MM
+        pocket_top_z = max(
+            pocket_floor_z + 0.2,
+            g.thickness_mm - _LABEL_TAB_REAR_RAIL_MM,
+        )
+        pocket_height = pocket_top_z - pocket_floor_z
+        entry_width = max(
+            1.0,
+            pocket_width - 2 * _LABEL_TAB_REAR_RAIL_MM,
+        )
+        entry_height = pocket_top_z + _EPSILON
+
+        return [
+            f"// rear_loading_label_cartridge=true tab_width_mm={tab_width:.4f} tab_depth_mm={_LABEL_TAB_RADIAL_DEPTH_MM:.4f}",
+            f"// cartridge_pocket_width_mm={pocket_width:.4f} cartridge_pocket_depth_mm={pocket_depth:.4f} suggested_cartridge_thickness_mm={max(0.2, pocket_height - _LABEL_CARTRIDGE_CLEARANCE_MM):.4f}",
+            "// The cartridge channel opens on the negative-Z mounting side and at the outer radial end.",
+            "// With the slotted Bahtinov face on the build plate, the pocket faces upward and needs no generated supports.",
+            "module label_cartridge_boss() {",
+            f"  translate([0, {tab_center_y:.4f}, mask_thickness_mm / 2]) cube([{tab_width:.4f}, {_LABEL_TAB_RADIAL_DEPTH_MM:.4f}, mask_thickness_mm], center=true);",
+            "}",
+            "module label_cartridge_pocket() {",
+            "  union() {",
+            "    // Main cartridge cavity, leaving a solid skin against the printed Bahtinov face.",
+            f"    translate([0, {pocket_center_y:.4f}, {pocket_floor_z + pocket_height / 2:.4f}]) cube([{pocket_width:.4f}, {pocket_depth + 2 * _EPSILON:.4f}, {pocket_height:.4f}], center=true);",
+            "    // Narrower rear opening leaves two longitudinal retaining rails.",
+            f"    translate([0, {pocket_center_y + _LABEL_CARTRIDGE_CLEARANCE_MM:.4f}, {entry_height / 2 - _EPSILON:.4f}]) cube([{entry_width:.4f}, {pocket_depth + 2 * _LABEL_CARTRIDGE_CLEARANCE_MM + 2 * _EPSILON:.4f}, {entry_height + 2 * _EPSILON:.4f}], center=true);",
+            "  }",
+            "}",
+        ]
 
     def _outer_face_fillet_module(self, g: MaskGeometry) -> list[str]:
         radius = g.outer_face_fillet_radius_mm
@@ -125,6 +186,7 @@ class OpenScadRenderer(MaskRenderer):
             f"mask_thickness_mm = {g.thickness_mm:.4f};",
             *self._common_modules(g),
             *self._mounting_module(g),
+            *self._label_cartridge_modules(g),
             *self._outer_face_fillet_module(g),
             "difference() {",
             "  union() {",
@@ -132,6 +194,8 @@ class OpenScadRenderer(MaskRenderer):
             f"    cylinder(h=mask_thickness_mm, d={g.ring.outer_diameter_mm:.4f});",
             "    // Shared Python cross-section mounting skirt: lead-in chamfer and external edge treatment.",
             "    mounting_ring();",
+            "    // Optional radial boss containing the replaceable rear-loaded label cartridge.",
+            "    label_cartridge_boss();",
             "  }",
         ]
         for slot in g.slots:
@@ -143,8 +207,8 @@ class OpenScadRenderer(MaskRenderer):
         if g.label:
             lines.extend(
                 [
-                    "  // Label is placed in peripheral material outside the clear aperture.",
-                    f'  translate([{g.label.position.x:.4f}, {g.label.position.y:.4f}, {g.thickness_mm - 0.35:.4f}]) linear_extrude(height=0.4) text({_scad_string(g.label.text)}, size={g.label.size_mm:.4f}, halign="center", valign="center");',
+                    "  // Rear-loading cartridge pocket replaces the former engraved face label.",
+                    "  label_cartridge_pocket();",
                 ]
             )
         lines.extend(["}", ""])
