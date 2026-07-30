@@ -207,6 +207,8 @@ def main(argv=None):
                 req = replace(req, formats=(OutputFormat.SCAD, OutputFormat.STL))
                 outputs += generate(req)
                 outputs += generate(req, test_ring=True)
+            if args.show_grating_info:
+                outputs += generate_label_cartridge(req)
         elif args.cmd == "generate-label-cartridge":
             outputs = generate_label_cartridge(req)
         elif args.cmd == "generate-test-ring":
