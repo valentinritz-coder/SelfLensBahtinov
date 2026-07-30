@@ -3,7 +3,7 @@ import argparse, logging, sys
 from dataclasses import replace
 from pathlib import Path
 from selflensbahtinov.algorithms import DEFAULT_REGION_GAP_MM
-from selflensbahtinov.generator import generate, geometry_for
+from selflensbahtinov.generator import generate, generate_label_cartridge, geometry_for
 from selflensbahtinov.models import GenerationRequest, MaskType, MountType, OutputFormat
 from selflensbahtinov.openscad import OpenScadError, UnsupportedFormatError
 from selflensbahtinov.validation import (
@@ -83,6 +83,7 @@ def parser():
 
     gen("generate")
     gen("generate-test-ring")
+    gen("generate-label-cartridge")
     gen("generate-bundle")
     return p
 
@@ -173,9 +174,9 @@ def main(argv=None):
             return 0
         req = _req(args, prof)
         full_geometry = None
-        if args.cmd != "generate-test-ring" and (args.show_grating_info or req.outer_face_fillet_radius_mm > 0):
+        if args.cmd not in ("generate-test-ring", "generate-label-cartridge") and (args.show_grating_info or req.outer_face_fillet_radius_mm > 0):
             full_geometry = geometry_for(req)
-        if args.show_grating_info and args.cmd != "generate-test-ring":
+        if args.show_grating_info and args.cmd not in ("generate-test-ring", "generate-label-cartridge"):
             geometry = full_geometry or geometry_for(req)
             grating = geometry.grating
             if grating is not None:
@@ -206,11 +207,12 @@ def main(argv=None):
                 req = replace(req, formats=(OutputFormat.SCAD, OutputFormat.STL))
                 outputs += generate(req)
                 outputs += generate(req, test_ring=True)
+        elif args.cmd == "generate-label-cartridge":
+            outputs = generate_label_cartridge(req)
+        elif args.cmd == "generate-test-ring":
+            outputs = generate(req, test_ring=True)
         else:
-            if args.cmd == "generate-test-ring":
-                outputs = generate(req, test_ring=True)
-            else:
-                outputs = generate(req)
+            outputs = generate(req)
         if full_geometry is not None and full_geometry.outer_face_fillet_radius_mm > 0:
             LOG.info("outer_face_fillet_radius_mm=%.4f", full_geometry.outer_face_fillet_radius_mm)
         for o in outputs:
