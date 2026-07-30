@@ -25,7 +25,6 @@ class MaskRenderer(ABC):
         """Render geometry as readable SCAD."""
 
 
-
 def _outer_face_fillet_cut_profile(
     *,
     outer_radius_mm: float,
@@ -63,7 +62,7 @@ class OpenScadRenderer(MaskRenderer):
         return [
             f"// mount_diameter_mm={g.ring.mount_diameter_mm:.4f} clearance_mm={g.ring.clearance_mm:.4f} inner_fit_diameter_mm={g.ring.inner_diameter_mm:.4f}",
             f"// ring_depth_mm={g.ring.depth_mm:.4f} lead_in_chamfer_mm={g.ring.lead_in_chamfer_mm:.4f} outer_edge_radius_mm={g.ring.outer_edge_radius_mm:.4f} straight_engagement_mm={g.ring.straight_engagement_mm:.4f}",
-            f"// mounting_entry_side={g.ring.mounting_entry_side}; print with the slotted Bahtinov face on the build plate and the negative-Z mounting side facing upward.",
+            f"// mounting_entry_side={g.ring.mounting_entry_side}; legacy orientation: negative-Z entry side down, no supports; preferred full-mask orientation: slotted Bahtinov face on the build plate with the negative-Z mounting side facing upward.",
             "module mounting_ring() {",
             f"  rotate_extrude(convexity=4) polygon(points=[{pts}]);",
             "}",
@@ -105,7 +104,7 @@ class OpenScadRenderer(MaskRenderer):
         entry_height = pocket_top_z + _EPSILON
 
         return [
-            f"// rear_loading_label_cartridge=true tab_width_mm={tab_width:.4f} tab_depth_mm={_LABEL_TAB_RADIAL_DEPTH_MM:.4f}",
+            f"// rear_loading_label_cartridge=true label_text={_scad_string(g.label.text)} tab_width_mm={tab_width:.4f} tab_depth_mm={_LABEL_TAB_RADIAL_DEPTH_MM:.4f}",
             f"// cartridge_pocket_width_mm={pocket_width:.4f} cartridge_pocket_depth_mm={pocket_depth:.4f} suggested_cartridge_thickness_mm={max(0.2, pocket_height - _LABEL_CARTRIDGE_CLEARANCE_MM):.4f}",
             "// The cartridge channel opens on the negative-Z mounting side and at the outer radial end.",
             "// With the slotted Bahtinov face on the build plate, the pocket faces upward and needs no generated supports.",
