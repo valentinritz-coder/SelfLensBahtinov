@@ -94,7 +94,7 @@ permissions:
 
 jobs:
   recommend:
-    name: Generate scientific recommendation
+    name: Generate scientific recommendation contract
     runs-on: ubuntu-latest
 
     steps:
@@ -119,10 +119,11 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-      - name: Generate Markdown recommendation
+      - name: Prepare report and assembly templates
         shell: bash
         run: |
           args=(
+            prepare-report
             --focal-length-mm "${{ inputs.focal_length_mm }}"
             --f-number "${{ inputs.f_number }}"
             --mask-clear-diameter-mm "${{ inputs.mask_clear_diameter_mm }}"
@@ -134,7 +135,7 @@ jobs:
             --minimum-slot-width-mm "${{ inputs.minimum_slot_width_mm }}"
             --minimum-bar-width-mm "${{ inputs.minimum_bar_width_mm }}"
             --side-groove-angle-deg "${{ inputs.side_groove_angle_deg }}"
-            --output generated/bahtinov-design-report.md
+            --output-dir generated
           )
 
           if [[ -n "${{ inputs.filter_bandwidth_nm }}" ]]; then
@@ -151,15 +152,22 @@ jobs:
             )
           fi
 
-          python -m selflensbahtinov.design_report "${args[@]}"
+          # The complete-mask entry point now wraps the same report renderer formerly called as:
+          # python -m selflensbahtinov.design_report
+          python -m selflensbahtinov.complete_mask "${args[@]}"
 
-      - name: Publish report in workflow summary
-        run: cat generated/bahtinov-design-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish report and next step
+        shell: bash
+        run: |
+          cat generated/bahtinov-design-report.md >> "$GITHUB_STEP_SUMMARY"
+          printf '\n---\n\n## Continue to the real mask\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf 'Use report workflow run ID: **%s**\n\n' "${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
+          cat generated/next-step.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Markdown report
+      - name: Upload scientific contract and templates
         uses: actions/upload-artifact@v7
         with:
-          name: bahtinov-design-report-${{ github.run_number }}
-          path: generated/bahtinov-design-report.md
+          name: bahtinov-scientific-design-${{ github.run_id }}
+          path: generated/
           if-no-files-found: error
           retention-days: 30

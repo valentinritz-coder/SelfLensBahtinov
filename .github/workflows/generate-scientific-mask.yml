@@ -1,0 +1,298 @@
+name: Assemble complete mask from scientific report
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_run_id:
+        description: Run ID from the completed scientific-report workflow
+        required: true
+        type: string
+
+      confirm_scientific_report:
+        description: I reviewed the report and accept its optical recommendation
+        required: true
+        default: false
+        type: boolean
+
+      manufacturer:
+        description: Lens manufacturer for the mechanical profile
+        required: true
+        type: string
+
+      model:
+        description: Lens model for the mechanical profile
+        required: true
+        type: string
+
+      label:
+        description: Short text for the removable label cartridge
+        required: true
+        type: string
+
+      mount_name:
+        description: Human-readable name of the measured mounting surface
+        required: true
+        default: hood-front-outer
+        type: string
+
+      mount_type:
+        description: Does the mask slide over an outside diameter or into an inside diameter?
+        required: true
+        default: outer-slip-fit
+        type: choice
+        options:
+          - outer-slip-fit
+          - inner-slip-fit
+
+      mount_diameter_mm:
+        description: Caliper measurement of the selected mounting diameter, in millimetres
+        required: true
+        type: string
+
+      usable_depth_mm:
+        description: Straight unobstructed axial depth available for the mounting skirt, in millimetres
+        required: true
+        default: "8.0"
+        type: string
+
+      measurement_status:
+        description: estimated makes a test ring only; measured or verified allows the complete mask
+        required: true
+        default: measured
+        type: choice
+        options:
+          - estimated
+          - measured
+          - verified
+
+      print_preset_name:
+        description: Name recorded for this print preset
+        required: true
+        default: default-pla
+        type: string
+
+      fit_clearance_mm:
+        description: Proposed radial slip-fit clearance; validate for your printer and material
+        required: true
+        default: "0.35"
+        type: string
+
+      mask_thickness_mm:
+        description: Proposed slotted front-face thickness
+        required: true
+        default: "2.0"
+        type: string
+
+      ring_wall_thickness_mm:
+        description: Proposed mounting-skirt wall thickness
+        required: true
+        default: "3.0"
+        type: string
+
+      region_gap_mm:
+        description: Proposed solid separator width between Bahtinov regions
+        required: true
+        default: "2.0"
+        type: string
+
+      lead_in_chamfer_mm:
+        description: Proposed mounting-entry chamfer; use 0 to disable
+        required: true
+        default: "1.0"
+        type: string
+
+      outer_edge_radius_mm:
+        description: Proposed support-free outside edge treatment; use 0 to disable
+        required: true
+        default: "0.5"
+        type: string
+
+      outer_face_fillet_radius_mm:
+        description: Proposed front-face outside fillet; use 0 to disable
+        required: true
+        default: "0.0"
+        type: string
+
+      engrave_label:
+        description: Include the 3-o'clock rear-loading label holder and matching cartridge
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  assemble:
+    name: Validate configuration and assemble real mask
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require explicit report confirmation
+        shell: bash
+        run: |
+          if [[ "${{ inputs.confirm_scientific_report }}" != "true" ]]; then
+            echo "The scientific report must be reviewed and explicitly confirmed." >&2
+            exit 2
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Download scientific report artifact
+        uses: actions/download-artifact@v5
+        with:
+          run-id: ${{ inputs.report_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: report-artifact
+          merge-multiple: true
+
+      - name: Locate frozen scientific contract
+        id: scientific-contract
+        shell: bash
+        run: |
+          CONTRACT="$(find report-artifact -type f -name bahtinov-scientific-design.json -print -quit)"
+          if [[ -z "$CONTRACT" ]]; then
+            echo "No bahtinov-scientific-design.json found in report run ${{ inputs.report_run_id }}" >&2
+            exit 2
+          fi
+          echo "path=$CONTRACT" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install project and tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+
+      - name: Install OpenSCAD
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes openscad xvfb
+          openscad --version
+
+      - name: Create headless OpenSCAD wrapper
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/openscad-headless" <<'EOF'
+          #!/usr/bin/env bash
+          exec xvfb-run -a openscad "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/openscad-headless"
+
+      - name: Compile Python sources
+        run: python -m compileall -q src tests
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Create mechanical profile and print preset
+        shell: bash
+        env:
+          MANUFACTURER: ${{ inputs.manufacturer }}
+          MODEL: ${{ inputs.model }}
+          LABEL: ${{ inputs.label }}
+          MOUNT_NAME: ${{ inputs.mount_name }}
+          MOUNT_TYPE: ${{ inputs.mount_type }}
+          MOUNT_DIAMETER_MM: ${{ inputs.mount_diameter_mm }}
+          USABLE_DEPTH_MM: ${{ inputs.usable_depth_mm }}
+          MEASUREMENT_STATUS: ${{ inputs.measurement_status }}
+          PRINT_PRESET_NAME: ${{ inputs.print_preset_name }}
+          FIT_CLEARANCE_MM: ${{ inputs.fit_clearance_mm }}
+          MASK_THICKNESS_MM: ${{ inputs.mask_thickness_mm }}
+          RING_WALL_THICKNESS_MM: ${{ inputs.ring_wall_thickness_mm }}
+          REGION_GAP_MM: ${{ inputs.region_gap_mm }}
+          LEAD_IN_CHAMFER_MM: ${{ inputs.lead_in_chamfer_mm }}
+          OUTER_EDGE_RADIUS_MM: ${{ inputs.outer_edge_radius_mm }}
+          OUTER_FACE_FILLET_RADIUS_MM: ${{ inputs.outer_face_fillet_radius_mm }}
+          ENGRAVE_LABEL: ${{ inputs.engrave_label }}
+        run: |
+          mkdir -p configuration
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from selflensbahtinov.assembly_config import (
+              MechanicalMount,
+              MechanicalProfile,
+              PrintPreset,
+              render_json,
+              slugify,
+          )
+
+          def number(name):
+              try:
+                  return float(os.environ[name])
+              except ValueError as exc:
+                  raise SystemExit(f"{name} must be a valid number") from exc
+
+          manufacturer = os.environ["MANUFACTURER"].strip()
+          model = os.environ["MODEL"].strip()
+          profile = MechanicalProfile(
+              schema_version=3,
+              manufacturer=manufacturer,
+              model=model,
+              slug=slugify(f"{manufacturer}-{model}"),
+              label=os.environ["LABEL"].strip(),
+              mounts=(
+                  MechanicalMount(
+                      name=os.environ["MOUNT_NAME"].strip(),
+                      type=os.environ["MOUNT_TYPE"],
+                      diameter_mm=number("MOUNT_DIAMETER_MM"),
+                      usable_depth_mm=number("USABLE_DEPTH_MM"),
+                      status=os.environ["MEASUREMENT_STATUS"],
+                      preferred=True,
+                  ),
+              ),
+          )
+          preset = PrintPreset(
+              schema_version=1,
+              name=os.environ["PRINT_PRESET_NAME"].strip(),
+              fit_clearance_mm=number("FIT_CLEARANCE_MM"),
+              mask_thickness_mm=number("MASK_THICKNESS_MM"),
+              ring_wall_thickness_mm=number("RING_WALL_THICKNESS_MM"),
+              region_gap_mm=number("REGION_GAP_MM"),
+              lead_in_chamfer_mm=number("LEAD_IN_CHAMFER_MM"),
+              outer_edge_radius_mm=number("OUTER_EDGE_RADIUS_MM"),
+              outer_face_fillet_radius_mm=number("OUTER_FACE_FILLET_RADIUS_MM"),
+              engrave_label=os.environ["ENGRAVE_LABEL"].lower() == "true",
+          )
+          profile.validate()
+          preset.validate()
+          Path("configuration/mechanical-profile.json").write_text(
+              render_json(profile), encoding="utf-8"
+          )
+          Path("configuration/print-preset.json").write_text(
+              render_json(preset), encoding="utf-8"
+          )
+          PY
+
+      - name: Assemble complete mask bundle
+        run: |
+          python -m selflensbahtinov.complete_mask assemble \
+            --scientific-contract "${{ steps.scientific-contract.outputs.path }}" \
+            --mechanical-profile configuration/mechanical-profile.json \
+            --print-preset configuration/print-preset.json \
+            --mount-name "${{ inputs.mount_name }}" \
+            --output-dir generated \
+            --openscad "$RUNNER_TEMP/openscad-headless" \
+            --confirm
+
+      - name: Publish assembly summary
+        run: cat generated/assembly-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: List generated files
+        run: find generated -maxdepth 1 -type f -printf "%f\n" | sort
+
+      - name: Upload complete mask bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: complete-bahtinov-mask-${{ github.run_id }}
+          path: generated/
+          if-no-files-found: error
+          retention-days: 30

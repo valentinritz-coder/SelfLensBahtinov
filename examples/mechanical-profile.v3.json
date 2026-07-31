@@ -1,0 +1,17 @@
+{
+  "schema_version": 3,
+  "manufacturer": "Fujifilm",
+  "model": "Fujinon XF100-400mmF4.5-5.6 R LM OIS WR",
+  "slug": "fujifilm-xf100-400",
+  "label": "XF100-400",
+  "mounts": [
+    {
+      "name": "hood-front-outer",
+      "type": "outer-slip-fit",
+      "diameter_mm": 92.6,
+      "usable_depth_mm": 8.0,
+      "status": "measured",
+      "preferred": true
+    }
+  ]
+}
