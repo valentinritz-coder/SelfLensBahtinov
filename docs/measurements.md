@@ -1,8 +1,8 @@
 # Lens and hood measurements
 
-SelfLensBahtinov supports smooth slip-fit caps. Printed threads and screw-in mounts remain out of scope. A nominal filter-thread size is product metadata; it is not necessarily the outside diameter of the lens barrel or hood.
+SelfLensBahtinov supports smooth slip-fit caps. Printed threads and screw-in mounts remain out of scope. A nominal filter-thread size is product metadata; it is not necessarily the outside diameter of the lens barrel or hood and is not part of the mechanical profile schema.
 
-The preferred scientific-report assembly path records measurements in a schema-v3 mechanical profile. It deliberately stores only real mounting facts:
+All measurements are recorded in a schema-v3 mechanical profile. It deliberately stores only real mounting facts:
 
 ```json
 {
@@ -24,7 +24,7 @@ The preferred scientific-report assembly path records measurements in a schema-v
 }
 ```
 
-See [scientific-mask-action.md](scientific-mask-action.md) for the complete report, mechanical-profile, print-preset, and assembly workflow. The older schema-v2 lens profiles remain supported by the legacy CLI for compatibility, but new assembly data should use this simpler mechanical schema.
+Schema versions 1 and 2 are no longer loaded or migrated. See [scientific-mask-action.md](scientific-mask-action.md) for the complete report, mechanical-profile, print-preset, and assembly workflow.
 
 ## General measurement method
 
@@ -80,7 +80,7 @@ Do not mark a catalogue dimension as verified merely because the internet presen
 2. Select one safe cylindrical mounting surface.
 3. Measure diameter in at least three orientations.
 4. Measure usable straight depth.
-5. Enter those values in the second assembly action.
+5. Add the surface to the corresponding file in `mechanical-profiles/`, or enter it in the assembly action.
 6. Review or edit the proposed print preset, especially radial clearance.
 7. Use `estimated` when uncertain so only a test ring is generated.
 8. Print and test the short ring.
