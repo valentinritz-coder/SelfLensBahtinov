@@ -1,21 +1,28 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
-import re
 from pathlib import Path
 
 import pytest
 
+from selflensbahtinov.assembly_config import (
+    MechanicalMount,
+    MechanicalProfile,
+    PrintPreset,
+    load_mechanical_profile,
+    load_print_preset,
+    render_json,
+)
+from selflensbahtinov.complete_mask import (
+    assemble_bundle,
+    build_complete_mask,
+    load_scientific_contract,
+    prepare_report_bundle,
+    render_scientific_contract,
+)
 from selflensbahtinov.design_report import DesignInputs, recommend
 from selflensbahtinov.models import GratingRegion
-from selflensbahtinov.scientific_mask import (
-    OPTICAL_PLATE_THICKNESS_MM,
-    build_mask,
-    generate_bundle,
-    main,
-    render_design_json,
-    render_scad,
-)
 
 
 def inputs(*, side_angle: float = 20.0) -> DesignInputs:
@@ -34,27 +41,90 @@ def inputs(*, side_angle: float = 20.0) -> DesignInputs:
     )
 
 
-def test_build_uses_the_same_scientific_recommendation():
-    source = inputs()
-    expected = recommend(source)
-    build = build_mask(source)
-
-    assert build.recommendation == expected
-    assert build.recommendation.printable_pitch_mm == pytest.approx(2.9255, abs=0.0001)
-    assert build.recommendation.slot_width_mm == pytest.approx(1.4628, abs=0.0001)
-    assert build.frame_width_mm == pytest.approx(expected.bar_width_mm)
-    assert build.region_gap_mm == pytest.approx(expected.bar_width_mm)
-    assert build.outer_diameter_mm == pytest.approx(
-        source.mask_clear_diameter_mm + 2 * expected.bar_width_mm
+def mechanical(*, status: str = "measured") -> MechanicalProfile:
+    return MechanicalProfile(
+        schema_version=3,
+        manufacturer="Fujifilm",
+        model="Fujinon XF100-400mmF4.5-5.6 R LM OIS WR",
+        slug="fujifilm-xf100-400",
+        label="XF100-400",
+        mounts=(
+            MechanicalMount(
+                name="hood-front-outer",
+                type="outer-slip-fit",
+                diameter_mm=92.6,
+                usable_depth_mm=8.0,
+                status=status,
+                preferred=True,
+            ),
+        ),
     )
-    assert build.thickness_mm == pytest.approx(OPTICAL_PLATE_THICKNESS_MM)
-    assert build.slots
 
 
-def test_side_angle_from_report_inputs_reaches_both_oblique_families():
-    build = build_mask(inputs(side_angle=30.0))
+def preset() -> PrintPreset:
+    return PrintPreset()
+
+
+def test_simple_configuration_contracts_round_trip(tmp_path):
+    profile_path = tmp_path / "mechanical.json"
+    preset_path = tmp_path / "print.json"
+    profile_path.write_text(render_json(mechanical()), encoding="utf-8")
+    preset_path.write_text(render_json(preset()), encoding="utf-8")
+
+    loaded_profile = load_mechanical_profile(profile_path)
+    loaded_preset = load_print_preset(preset_path)
+
+    assert loaded_profile == mechanical()
+    assert loaded_profile.select_mount().name == "hood-front-outer"
+    assert loaded_preset == preset()
+
+
+def test_prepare_report_emits_frozen_contract_and_follow_up_templates(tmp_path):
+    outputs = prepare_report_bundle(inputs(), output_dir=tmp_path)
+    assert {path.name for path in outputs} == {
+        "bahtinov-design-report.md",
+        "bahtinov-scientific-design.json",
+        "mechanical-profile.template.json",
+        "print-preset.proposed.json",
+        "next-step.md",
+    }
+    assert load_scientific_contract(
+        tmp_path / "bahtinov-scientific-design.json"
+    ) == recommend(inputs())
+    template = json.loads(
+        (tmp_path / "mechanical-profile.template.json").read_text(encoding="utf-8")
+    )
+    assert template["schema_version"] == 3
+    assert template["mounts"][0]["diameter_mm"] is None
+    assert "report workflow run ID" in (tmp_path / "next-step.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_scientific_contract_detects_edited_recommendation(tmp_path):
+    recommendation = recommend(inputs())
+    payload = json.loads(render_scientific_contract(recommendation))
+    payload["recommendation"]["printable_pitch_mm"] += 0.1
+    path = tmp_path / "edited.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="recommendation drift"):
+        load_scientific_contract(path)
+
+
+def test_complete_build_combines_science_mechanics_and_print_preset():
+    scientific = recommend(inputs(side_angle=30.0))
+    build = build_complete_mask(scientific, mechanical(), preset())
+
+    assert build.full_geometry is not None
+    assert build.full_geometry.clear_aperture_mm == pytest.approx(76.7)
+    assert build.test_ring_geometry.test_ring is True
+    assert build.test_ring_geometry.ring.depth_mm == pytest.approx(4.0)
+    assert build.full_geometry.ring.depth_mm == pytest.approx(8.0)
+    assert build.full_geometry.label is not None
+    assert build.pattern_border_mm == pytest.approx((93.3 - 76.7) / 2)
     by_region = {
-        region: {slot.angle_deg for slot in build.slots if slot.region is region}
+        region: {slot.angle_deg for slot in build.full_geometry.slots if slot.region is region}
         for region in {
             GratingRegion.LEFT_REFERENCE,
             GratingRegion.RIGHT_UPPER,
@@ -66,119 +136,92 @@ def test_side_angle_from_report_inputs_reaches_both_oblique_families():
         GratingRegion.RIGHT_UPPER: {30.0},
         GratingRegion.RIGHT_LOWER: {-30.0},
     }
-
-
-def test_flat_plate_scad_contains_report_geometry_without_mounting_features():
-    build = build_mask(inputs())
-    scad = render_scad(build)
-
-    assert "Generated from Bahtinov scientific-report inputs only" in scad
-    assert f"grating_pitch_mm={build.recommendation.printable_pitch_mm:.4f}" in scad
-    assert "side_groove_angle_deg=20.0000" in scad
-    assert "20.0000, \"right-upper\"" in scad
-    assert "-20.0000, \"right-lower\"" in scad
-    assert "mounting_ring" not in scad
-    assert "label_cartridge" not in scad
-    assert "fit_clearance" not in scad
-    assert "difference()" in scad
-
-
-def test_design_json_is_a_machine_readable_contract():
-    build = build_mask(inputs())
-    payload = json.loads(render_design_json(build))
-
-    assert payload["schema_version"] == 1
-    assert payload["kind"] == "bahtinov-optical-plate"
-    assert payload["inputs"]["side_groove_angle_deg"] == pytest.approx(20.0)
-    assert payload["recommendation"]["printable_pitch_mm"] == pytest.approx(
-        build.recommendation.printable_pitch_mm
+    assert build.full_geometry.grating is not None
+    assert build.full_geometry.grating.pitch_selection_source == (
+        "scientific-report-contract"
     )
-    fixed = payload["fixed_plate_geometry"]
-    assert fixed["mounting_geometry_included"] is False
-    assert fixed["label_geometry_included"] is False
-    assert fixed["plate_thickness_mm"] == pytest.approx(2.0)
-    assert payload["slot_count"] == len(build.slots)
 
 
-def test_scad_only_bundle_writes_report_json_and_scad(tmp_path):
-    outputs = generate_bundle(inputs(), output_dir=tmp_path, scad_only=True)
-    assert {path.name for path in outputs} == {
-        "bahtinov-design-report.md",
-        "bahtinov-optical-mask.json",
-        "bahtinov-optical-mask.scad",
-    }
-    assert all(path.exists() and path.stat().st_size > 0 for path in outputs)
-    assert "Useful illuminated periods" in (
-        tmp_path / "bahtinov-design-report.md"
-    ).read_text(encoding="utf-8")
+def test_estimated_mount_generates_test_ring_only():
+    build = build_complete_mask(recommend(inputs()), mechanical(status="estimated"), preset())
+    assert build.test_ring_geometry.test_ring is True
+    assert build.full_geometry is None
 
 
-def test_cli_accepts_only_report_inputs_for_scad_only_generation(tmp_path):
-    assert main(
-        [
-            "--focal-length-mm",
-            "400",
-            "--f-number",
-            "5.6",
-            "--mask-clear-diameter-mm",
-            "76.7",
-            "--wavelength-nm",
-            "550",
-            "--pixel-pitch-um",
-            "3.76",
-            "--binning",
-            "1",
-            "--focus-mode",
-            "visual",
-            "--target-first-order-offset-px",
-            "20",
-            "--minimum-slot-width-mm",
-            "0.8",
-            "--minimum-bar-width-mm",
-            "0.8",
-            "--side-groove-angle-deg",
-            "20",
-            "--output-dir",
-            str(tmp_path),
-            "--scad-only",
-        ]
-    ) == 0
-    assert (tmp_path / "bahtinov-optical-mask.scad").exists()
+def test_mechanical_geometry_must_preserve_report_clear_diameter():
+    tiny = replace(
+        mechanical(),
+        mounts=(
+            replace(
+                mechanical().mounts[0],
+                diameter_mm=70.0,
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match="less clear diameter"):
+        build_complete_mask(recommend(inputs()), tiny, preset())
 
 
-def _workflow_input_names(path: Path) -> tuple[str, ...]:
-    text = path.read_text(encoding="utf-8")
-    block = text.split("    inputs:\n", 1)[1].split("\npermissions:", 1)[0]
-    return tuple(re.findall(r"^      ([a-z0-9_]+):$", block, flags=re.MULTILINE))
+def test_scad_only_assembly_emits_real_mask_ring_and_cartridge(tmp_path):
+    scientific_path = tmp_path / "science.json"
+    mechanical_path = tmp_path / "mechanical.json"
+    preset_path = tmp_path / "preset.json"
+    scientific_path.write_text(
+        render_scientific_contract(recommend(inputs())), encoding="utf-8"
+    )
+    mechanical_path.write_text(render_json(mechanical()), encoding="utf-8")
+    preset_path.write_text(render_json(preset()), encoding="utf-8")
+
+    outputs = assemble_bundle(
+        scientific_contract=scientific_path,
+        mechanical_profile=mechanical_path,
+        print_preset=preset_path,
+        output_dir=tmp_path / "out",
+        openscad="openscad",
+        mount_name="hood-front-outer",
+        confirmed=True,
+        scad_only=True,
+    )
+    names = {path.name for path in outputs}
+    assert any(name.endswith("-bahtinov-mask.scad") for name in names)
+    assert any(name.endswith("-fit-test-ring.scad") for name in names)
+    assert any(name.endswith("-label-cartridge.scad") for name in names)
+    mask = next(path for path in outputs if path.name.endswith("-bahtinov-mask.scad"))
+    scad = mask.read_text(encoding="utf-8")
+    assert "label_holder_clock_position=3" in scad
+    assert '20.000, "right-upper"' in scad
+    assert '-20.000, "right-lower"' in scad
 
 
-def test_generation_workflow_uses_exactly_the_report_workflow_inputs():
-    report_workflow = Path(".github/workflows/recommend-mask.yml")
-    generation_workflow = Path(".github/workflows/generate-scientific-mask.yml")
+def test_assembly_requires_explicit_confirmation(tmp_path):
+    with pytest.raises(ValueError, match="explicit confirmation"):
+        assemble_bundle(
+            scientific_contract=tmp_path / "science.json",
+            mechanical_profile=tmp_path / "mechanical.json",
+            print_preset=tmp_path / "preset.json",
+            output_dir=tmp_path / "out",
+            openscad="openscad",
+            confirmed=False,
+            scad_only=True,
+        )
 
-    report_inputs = _workflow_input_names(report_workflow)
-    generation_inputs = _workflow_input_names(generation_workflow)
-    assert generation_inputs == report_inputs
-    assert set(generation_inputs) == {
-        "focal_length_mm",
-        "f_number",
-        "mask_clear_diameter_mm",
-        "wavelength_nm",
-        "filter_bandwidth_nm",
-        "pixel_pitch_um",
-        "binning",
-        "focus_mode",
-        "expected_star_snr",
-        "target_first_order_offset_px",
-        "minimum_slot_width_mm",
-        "minimum_bar_width_mm",
-        "side_groove_angle_deg",
-    }
 
-    workflow = generation_workflow.read_text(encoding="utf-8")
-    assert "python -m selflensbahtinov.scientific_mask" in workflow
-    assert "--mount" not in workflow
-    assert "mount_diameter" not in workflow
-    assert "--clearance" not in workflow
-    assert "--ring-depth" not in workflow
-    assert "bahtinov-optical-mask.scad" in workflow or "generated/" in workflow
+def test_workflows_form_a_two_stage_handoff():
+    report = Path(".github/workflows/recommend-mask.yml").read_text(encoding="utf-8")
+    assembly = Path(".github/workflows/generate-scientific-mask.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "prepare-report" in report
+    assert "generated/" in report
+    assert "github.run_id" in report
+    assert "report_run_id:" in assembly
+    assert "confirm_scientific_report:" in assembly
+    assert "actions/download-artifact@v5" in assembly
+    assert "run-id: ${{ inputs.report_run_id }}" in assembly
+    assert "mechanical-profile.json" in assembly
+    assert "print-preset.json" in assembly
+    assert "--confirm" in assembly
+    assert "mount_diameter_mm:" in assembly
+    assert "fit_clearance_mm:" in assembly
+    assert "engrave_label:" in assembly
