@@ -1,40 +1,60 @@
 # Bahtinov optical algorithm
 
-SelfLensBahtinov generates Bahtinov aperture-plane geometry in Python. OpenSCAD receives Python-calculated candidate slot rectangles and performs the final boolean clipping against the circular clear aperture and the assigned grating region for export; it does not choose grating pitch, slot width, density, optical constants, or which clipped normal-Bahtinov slots are retained.
+SelfLensBahtinov generates Bahtinov aperture-plane geometry in Python. OpenSCAD receives Python-calculated slot rectangles and performs the final boolean clipping against the circular clear aperture and assigned grating region. It does not choose the optical pitch, slot width, side angle, mechanical mounting diameter, or printer tolerances.
+
+Those responsibilities are separated:
+
+```text
+Scientific report  -> pitch, slot width, bar width, clear diameter, side angle
+Mechanical profile -> mounting diameter, fit direction, usable depth
+Print preset       -> clearance, thicknesses, separator, edge treatment
+```
 
 ## Physical model
 
-A Bahtinov mask is three parallel rectangular transmission gratings assigned to three explicit parts of the entrance aperture:
+A normal Bahtinov mask contains three parallel rectangular transmission gratings assigned to explicit parts of the entrance aperture:
 
-1. `LEFT_REFERENCE`, a reference grating occupying the left side of the clear aperture;
-2. `RIGHT_UPPER`, a side grating on the upper-right side;
-3. `RIGHT_LOWER`, an oppositely angled side grating on the lower-right side.
+1. `LEFT_REFERENCE`, the reference grating on the left;
+2. `RIGHT_UPPER`, an oblique grating on the upper right;
+3. `RIGHT_LOWER`, the opposite oblique grating on the lower right.
 
-Each grating is a periodic aperture function with effective pitch `p` and open slot width `w`. The opaque bar width is `p - w`, and the open fraction is `w / p`. Slot direction, grating-vector direction, and diffraction-spike direction are different quantities:
+Each grating has pitch `p`, open slot width `w`, opaque bar width `p - w`, and open fraction `w / p`. Slots inside one region remain parallel. They do not individually converge toward the optical centre.
 
-- the slot direction is the long axis of each rectangular opening;
-- the grating vector is perpendicular to the slot family and has magnitude `1 / p`;
-- the first-order diffraction spike is perpendicular to the slot family in the rendered star image.
-
-Slots inside a region remain parallel. They do not individually converge toward the optical centre. The centre-oriented appearance seen in common Bahtinov masks comes from clipping parallel slots to the left, upper-right, and lower-right region boundaries.
-
-The scalar diffraction relationship used for metadata and validation is the Fraunhofer grating equation:
+The first-order grating relation is:
 
 ```text
-sin(theta_m) = m * lambda / p
+p sin(theta_1) = lambda
 ```
 
-For focusing masks the useful visual cue is the first order (`m = 1`). SelfLensBahtinov uses a green reference wavelength of `550 nm`, a conventional photopic midpoint. The approximate first-order displacement at the image plane is:
+The exact sensor-plane offset used by the scientific report is:
 
 ```text
-x ~= f * tan(theta_1)
+x_1 = F tan(asin(lambda / p))
 ```
 
-where `f` is the selected focal length. The production generator does not render a point-spread function. V1 tests verify the slot/grating/spike orientation convention, but they do not claim to be a scalar-diffraction simulation.
+The report chooses a pitch from the requested sensor offset and wavelength, then clamps it only when the declared minimum printable slot and bar widths require a coarser grating. A 50% open fraction is the unconstrained starting point for a rectangular binary amplitude grating.
+
+## Variable side angle
+
+The central family is defined at `0°`; the side families are placed at `+alpha` and `-alpha`. The report-selected `side_groove_angle_deg` is applied directly to the complete mask.
+
+Pitch controls the radial location of the diffraction order. Groove orientation controls its direction. The project does not claim one angle is universally optimal without a declared focus estimator, seeing, signal-to-noise ratio, and objective function.
+
+## Effective clear diameter
+
+The scientific report distinguishes:
+
+```text
+physical printed clear diameter
+estimated entrance pupil = F / N
+effectively illuminated diameter = min(printed diameter, F / N)
+```
+
+The physical mask keeps the requested printed clear diameter. The mechanical assembly rejects a mount that cannot preserve it. It does not silently shrink the optical aperture to rescue incompatible measurements.
 
 ## Region topology and separator bands
 
-The normal Bahtinov topology follows the original/common three-region layout more closely than the former equal-sector approximation. The regions use a physical separator gap `region_gap_mm`, whose default is `2.0 mm`:
+The three regions use a physical separator gap `region_gap_mm`:
 
 ```text
 LEFT_REFERENCE: x <= -region_gap_mm / 2
@@ -42,47 +62,55 @@ RIGHT_UPPER:    x >=  region_gap_mm / 2 and y >=  region_gap_mm / 2
 RIGHT_LOWER:    x >=  region_gap_mm / 2 and y <= -region_gap_mm / 2
 ```
 
-The central vertical band and right-side horizontal band remain solid. These separator bands provide mechanical support and isolate the three grating regions. `region_gap_mm` must be finite and non-negative, must leave usable area in every region, and any non-zero gap must meet the same minimum printable-width policy used for opaque grating bars.
-
-Tri-Bahtinov generation keeps its existing six-region angular topology. The explicit region identifiers prevent normal Bahtinov masks from accidentally falling back to three equal 120-degree sectors.
-
-## Default pitch selection
-
-The default geometry is a physics-informed printable heuristic, not a full optical derivation. Python computes the pitch implied by a target first-order sensor offset, then applies practical aperture-size clamps and printer limits. Therefore the generated mask remains a real three-grating Bahtinov pattern, but the default pitch may be determined by the practical clamp rather than solely by the grating equation. Explicit `--slot-spacing` and `--slot-width` are the way to request a specific physical grating.
+The central vertical band and right-side horizontal band remain solid for mechanical support. Separator width is a print-preset decision, not a lens-profile field and not an optical measurement.
 
 ## Clipped-slot manufacturing cleanup
 
-Candidate slots are intentionally longer than the clear aperture so OpenSCAD can clip each opening to:
+Candidate slots are intentionally longer than the clear aperture and are clipped to:
 
 ```text
 clear aperture ∩ assigned region ∩ candidate rectangle
 ```
 
-A curved slot end produced by the circular clear aperture is normal and is not treated as a defect. A long slot with one circular end, a long slot clipped diagonally by a region boundary, or any non-rectangular end with enough parallel-edge length remains valid.
+A curved end caused by the circular aperture is normal. Python performs two cleanup passes before export:
 
-Before rendering a normal three-region Bahtinov mask, Python clips every candidate rectangle against a deterministic polygonal representation of the circular clear aperture and the assigned rectangular region. It then records `useful_length_mm`, the projected span of that final clipped geometry along the slot's own longitudinal axis. Slots whose useful length is below `minimum_clipped_slot_length_mm` are discarded; slots at or above the threshold are retained and still receive OpenSCAD's final boolean clipping. The circle is approximated with 256 segments for this keep/discard decision, so the result is deterministic and conservative at printer-scale tolerances while avoiding STL mesh inspection.
+- topology validation rejects disconnected or doubly curved malformed remnants;
+- printability filtering rejects short or strongly tapered slivers while retaining useful rectangular and singly clipped slots.
 
-The default threshold is `max(2 * slot_width_mm, 4.0 mm)`, which is intended as a safe cleanup value for typical 0.4 mm-nozzle printing and current default slot widths. Passing `--minimum-clipped-slot-length 0` disables this cleanup. This parameter is a manufacturing cleanup control only: it does not change optical pitch, grating density, slot angle, separator-band topology, mounting geometry, profile schema, or test-ring generation. Tri-Bahtinov keeps its existing six-region topology and does not currently apply this cleanup rule.
+The default minimum useful projected length is:
 
-## Configurable dimensions
+```text
+max(2 * slot_width_mm, 4.0 mm)
+```
 
-The CLI exposes the grating and region parameters:
+All SCAD, STL, and 3MF exports use the same retained slot set.
 
-- `--slot-spacing`: physical pitch in millimetres before density scaling.
-- `--slot-width`: open slot width in millimetres.
-- `--slot-density`: slot-count density multiplier. The effective pitch is `slot_spacing / slot_density`. If slot width is omitted, Python chooses width from the effective pitch; if slot width is explicit, the user is intentionally changing the open fraction.
-- `--region-gap`: full physical width of the solid separator band between normal Bahtinov regions. The default is `2.0 mm`.
-- `--minimum-clipped-slot-length`: minimum useful projected length, in millimetres, required after clipping a normal Bahtinov candidate slot to the clear aperture and assigned region. The default is `max(2 * slot_width_mm, 4.0 mm)`; `0` disables the cleanup filter.
-- `--show-grating-info`: print the rounded base pitch, effective pitch, slot width, bar width, open fraction, density, reference wavelength, first-order angle, sensor-plane offset, and pitch-selection source used for the generated full mask.
+## Mechanical assembly
 
-The generator rejects non-manufacturable or non-physical geometry, including NaN, infinity, microscopic pitch, microscopic open slots, microscopic opaque bars, non-zero separator gaps below the printable minimum, excessive slot counts, duplicate slots, and regions that would receive no retained normal-Bahtinov slots after clipped-slot cleanup. Validation is applied after output-precision rounding so values that quantize into invalid geometry are rejected.
+The schema-v3 mechanical profile contains no focal length, aperture, optical recommendation, clearance, face thickness, or edge treatment. It contributes only the selected measured mount:
+
+- outer or inner slip-fit direction;
+- physical diameter;
+- usable straight depth;
+- measurement status.
+
+The print preset contributes radial clearance, skirt wall thickness, face thickness, separator width, chamfer, outer-edge treatment, optional front-face fillet, and label choice.
+
+## Output geometry
+
+The complete assembly retains:
+
+- the rear-loading label holder at 3 o'clock;
+- a coplanar slotted build face;
+- a solid full-width crown root beneath the holder;
+- a short matching fit-test ring;
+- the same mounting cross-section for test ring and full mask;
+- the scientific pitch, slot width, clear diameter, and side angle.
 
 ## References
 
-The model follows standard scalar diffraction and Bahtinov-mask design principles:
+The generated scientific report records the evidential role of:
 
-- Diffraction grating equation: a periodic aperture with pitch `p` sends order `m` to angles satisfying `sin(theta_m) = m * lambda / p`.
-- Fraunhofer approximation: a mask at the entrance aperture of a focused lens maps small angular diffraction offsets to image-plane offsets with `x ~= f tan(theta)`.
-- Bahtinov-mask geometry: Pavel Bahtinov's focusing mask combines three linear grating regions at different orientations; focus is read when the reference spike lies symmetrically between the two side spikes.
-
-These references justify why the generated pattern is not an arbitrary family of clipped lines. It is a set of three assigned transmission gratings whose pitch and duty cycle define real first-order diffraction spikes.
+- van den Born, Jellema, and Dijkstra, MNRAS 512 (2022), DOI `10.1093/mnras/stac845`, for grating density, orientation, and entrance-pupil treatment;
+- Zandvliet (2017), University of Groningen, for a practical Bahtinov focus-estimation case study;
+- Perrin and Montgomery (2018), arXiv `1802.07161`, for the general Fourier-optics framework.
