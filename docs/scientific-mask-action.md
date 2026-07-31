@@ -1,6 +1,6 @@
 # From scientific report to a real lens-mounted mask
 
-The project now treats a printable Bahtinov mask as the composition of three independent contracts:
+A printable Bahtinov mask is the composition of three independent contracts:
 
 ```text
 Scientific report  -> optical grating
@@ -11,11 +11,13 @@ All three          -> complete mask, fit-test ring, and label cartridge
 
 This separation prevents focal length from pretending it knows the diameter of a lens hood, and prevents printer calibration values from masquerading as optical science.
 
+Mechanical profiles use schema version 3 only. There is no schema-v2 loader, migration path, combined optical profile, or legacy generation action.
+
 ## Why there are two GitHub Actions runs
 
 A `workflow_dispatch` form is fixed before a run starts. The report workflow cannot stop halfway through, inspect its own calculation, and then open a new dynamic form containing arbitrary follow-up fields.
 
-The user flow is therefore deliberately split:
+The user flow is deliberately split:
 
 1. Run **Recommend Bahtinov mask parameters**.
 2. Read the Markdown report in the workflow summary.
@@ -25,7 +27,7 @@ The user flow is therefore deliberately split:
 6. Tick the explicit report-confirmation checkbox.
 7. Download the complete artifact bundle.
 
-The second workflow downloads the frozen scientific contract from the selected report run. It does not recompute the recommendation from a new collection of loosely copied numbers.
+The second workflow downloads the frozen scientific contract from the selected report run. It does not reconstruct the recommendation from loosely copied numbers.
 
 ## Stage 1: scientific report
 
@@ -49,9 +51,9 @@ It produces:
 - `print-preset.proposed.json`;
 - `next-step.md`.
 
-The JSON scientific contract stores both the original inputs and the derived pitch, slot width, bar width, offset, and angle. Assembly recomputes and compares the critical values before accepting it, so an edited or stale contract fails instead of quietly changing the mask.
+The scientific JSON stores the original inputs and the derived pitch, slot width, bar width, offset, clear diameter, and angle. Assembly recomputes and compares critical values before accepting it, so an edited or stale contract fails instead of quietly changing the mask.
 
-## Stage 2: simplified mechanical profile
+## Stage 2: schema-v3 mechanical profile
 
 A mechanical profile describes only the real object on which the mask must fit:
 
@@ -75,6 +77,8 @@ A mechanical profile describes only the real object on which the mask must fit:
 }
 ```
 
+Official profiles live in `mechanical-profiles/`. An identity-only catalog profile may contain an empty `mounts` array until a trustworthy measurement is available. Such a profile is valid catalog data but cannot assemble a mask or test ring.
+
 ### Mechanical fields
 
 | Field | Meaning |
@@ -86,13 +90,13 @@ A mechanical profile describes only the real object on which the mask must fit:
 | `status` | `estimated`, `measured`, or `verified` |
 | `preferred` | Default mount when a profile contains several alternatives |
 
-Measure a diameter in at least three rotational orientations. For an outside fit, record the largest reading. Check that the chosen surface is straight and does not move during zooming or focusing.
+Measure in at least three rotational orientations. For an outside fit, record the largest reading. Check that the selected surface is straight and does not move during zooming or focusing.
 
 An `estimated` diameter generates only the short fit-test ring. A full mask requires `measured` or `verified`. `verified` means a printed test ring has already fitted the actual lens or hood.
 
 ## Stage 3: print preset
 
-The print preset owns printer- and material-dependent decisions:
+Print presets live in `print-presets/` and own printer- and material-dependent decisions:
 
 ```json
 {
@@ -109,7 +113,35 @@ The print preset owns printer- and material-dependent decisions:
 }
 ```
 
-The assembly action proposes these defaults in its form. They are not treated as measurements or scientific constants. The user reviews or edits them before checking the confirmation box, because plastic tolerances remain distressingly uninterested in elegant equations.
+The assembly action proposes these values in its form. They are not treated as measurements or scientific constants. The user reviews or edits them before confirmation, because plastic tolerances remain distressingly uninterested in elegant equations.
+
+## CLI profile workflow
+
+Inspect the official catalog:
+
+```powershell
+selflensbahtinov search Fuji
+selflensbahtinov show fujifilm-xf100-400
+selflensbahtinov validate fujifilm-xf100-400
+```
+
+Create a profile and add a measured surface:
+
+```powershell
+selflensbahtinov create-profile `
+  --manufacturer Fujifilm `
+  --model "Fujinon XF100-400mmF4.5-5.6 R LM OIS WR" `
+  --label XF100-400 `
+  --output mechanical-profiles/fujifilm-xf100-400.json
+
+selflensbahtinov add-mount fujifilm-xf100-400 `
+  --name hood-front-outer `
+  --type outer-slip-fit `
+  --diameter-mm 92.6 `
+  --usable-depth-mm 8.0 `
+  --status measured `
+  --preferred
+```
 
 ## Complete generated bundle
 
