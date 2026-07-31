@@ -214,9 +214,4 @@ def mechanical_profile_template(*, clear_diameter_mm: float) -> dict[str, Any]:
                 "preferred": True,
             }
         ],
-        "measurement_hint": (
-            "Measure the selected cylindrical mounting surface with calipers in at "
-            "least three orientations. For an outer fit, diameter_mm must normally "
-            f"be larger than the requested clear optical diameter {clear_diameter_mm:.3f} mm."
-        ),
     }
