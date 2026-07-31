@@ -224,5 +224,6 @@ def test_workflow_collects_corrected_scientific_inputs():
     assert "--focus-mode" in workflow
     assert "--filter-bandwidth-nm" in workflow
     assert "--expected-star-snr" in workflow
-    assert "python -m selflensbahtinov.design_report" in workflow
-    assert "generated/bahtinov-design-report.md" in workflow
+    assert "python -m selflensbahtinov.complete_mask" in workflow
+    assert "prepare-report" in workflow
+    assert "--output-dir generated" in workflow
