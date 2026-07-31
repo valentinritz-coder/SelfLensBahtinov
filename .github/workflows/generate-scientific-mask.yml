@@ -1,105 +1,163 @@
-name: Generate mask from scientific report inputs
+name: Assemble complete mask from scientific report
 
 on:
   workflow_dispatch:
     inputs:
-      focal_length_mm:
-        description: Working focal length in millimetres
+      report_run_id:
+        description: Run ID from the completed scientific-report workflow
         required: true
-        default: "400"
         type: string
 
-      f_number:
-        description: Working aperture as an f-number, for example 5.6
+      confirm_scientific_report:
+        description: I reviewed the report and accept its optical recommendation
         required: true
-        default: "5.6"
+        default: false
+        type: boolean
+
+      manufacturer:
+        description: Lens manufacturer for the mechanical profile
+        required: true
         type: string
 
-      mask_clear_diameter_mm:
-        description: Physical clear diameter available for the slotted mask pattern, in millimetres
+      model:
+        description: Lens model for the mechanical profile
         required: true
-        default: "76.7"
         type: string
 
-      wavelength_nm:
-        description: Reference or filter central wavelength in nanometres
+      label:
+        description: Short text for the removable label cartridge
         required: true
-        default: "550"
         type: string
 
-      filter_bandwidth_nm:
-        description: Optional full filter bandwidth in nanometres; empty keeps a monochromatic estimate
-        required: false
-        default: ""
+      mount_name:
+        description: Human-readable name of the measured mounting surface
+        required: true
+        default: hood-front-outer
         type: string
 
-      pixel_pitch_um:
-        description: Native sensor pixel pitch in micrometres
+      mount_type:
+        description: Does the mask slide over an outside diameter or into an inside diameter?
         required: true
-        default: "3.76"
-        type: string
-
-      binning:
-        description: Sensor binning factor
-        required: true
-        default: "1"
+        default: outer-slip-fit
         type: choice
         options:
-          - "1"
-          - "2"
-          - "3"
-          - "4"
+          - outer-slip-fit
+          - inner-slip-fit
 
-      focus_mode:
-        description: Intended focus-reading method
+      mount_diameter_mm:
+        description: Caliper measurement of the selected mounting diameter, in millimetres
         required: true
-        default: visual
+        type: string
+
+      usable_depth_mm:
+        description: Straight unobstructed axial depth available for the mounting skirt, in millimetres
+        required: true
+        default: "8.0"
+        type: string
+
+      measurement_status:
+        description: estimated makes a test ring only; measured or verified allows the complete mask
+        required: true
+        default: measured
         type: choice
         options:
-          - visual
-          - software-assisted
+          - estimated
+          - measured
+          - verified
 
-      expected_star_snr:
-        description: Optional expected stellar signal-to-noise ratio for software-assisted interpretation
-        required: false
-        default: ""
-        type: string
-
-      target_first_order_offset_px:
-        description: Desired first-order diffraction distance from the stellar core, in effective pixels
+      print_preset_name:
+        description: Name recorded for this print preset
         required: true
-        default: "20"
+        default: default-pla
         type: string
 
-      minimum_slot_width_mm:
-        description: Smallest reliably printable open slot width, in millimetres
+      fit_clearance_mm:
+        description: Proposed radial slip-fit clearance; validate for your printer and material
         required: true
-        default: "0.8"
+        default: "0.35"
         type: string
 
-      minimum_bar_width_mm:
-        description: Smallest reliably printable opaque bar width, in millimetres
+      mask_thickness_mm:
+        description: Proposed slotted front-face thickness
         required: true
-        default: "0.8"
+        default: "2.0"
         type: string
 
-      side_groove_angle_deg:
-        description: Angle of each side groove family relative to the central grooves, in degrees
+      ring_wall_thickness_mm:
+        description: Proposed mounting-skirt wall thickness
         required: true
-        default: "20"
+        default: "3.0"
         type: string
+
+      region_gap_mm:
+        description: Proposed solid separator width between Bahtinov regions
+        required: true
+        default: "2.0"
+        type: string
+
+      lead_in_chamfer_mm:
+        description: Proposed mounting-entry chamfer; use 0 to disable
+        required: true
+        default: "1.0"
+        type: string
+
+      outer_edge_radius_mm:
+        description: Proposed support-free outside edge treatment; use 0 to disable
+        required: true
+        default: "0.5"
+        type: string
+
+      outer_face_fillet_radius_mm:
+        description: Proposed front-face outside fillet; use 0 to disable
+        required: true
+        default: "0.0"
+        type: string
+
+      engrave_label:
+        description: Include the 3-o'clock rear-loading label holder and matching cartridge
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  generate:
-    name: Generate report-derived optical mask
+  assemble:
+    name: Validate configuration and assemble real mask
     runs-on: ubuntu-latest
 
     steps:
+      - name: Require explicit report confirmation
+        shell: bash
+        run: |
+          if [[ "${{ inputs.confirm_scientific_report }}" != "true" ]]; then
+            echo "The scientific report must be reviewed and explicitly confirmed." >&2
+            exit 2
+          fi
+
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Download scientific report artifact
+        uses: actions/download-artifact@v5
+        with:
+          run-id: ${{ inputs.report_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: report-artifact
+          merge-multiple: true
+
+      - name: Locate frozen scientific contract
+        id: scientific-contract
+        shell: bash
+        run: |
+          CONTRACT="$(find report-artifact -type f -name bahtinov-scientific-design.json -print -quit)"
+          if [[ -z "$CONTRACT" ]]; then
+            echo "No bahtinov-scientific-design.json found in report run ${{ inputs.report_run_id }}" >&2
+            exit 2
+          fi
+          echo "path=$CONTRACT" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -134,55 +192,107 @@ jobs:
       - name: Run tests
         run: pytest -q
 
-      - name: Generate scientific optical mask bundle
+      - name: Create mechanical profile and print preset
         shell: bash
+        env:
+          MANUFACTURER: ${{ inputs.manufacturer }}
+          MODEL: ${{ inputs.model }}
+          LABEL: ${{ inputs.label }}
+          MOUNT_NAME: ${{ inputs.mount_name }}
+          MOUNT_TYPE: ${{ inputs.mount_type }}
+          MOUNT_DIAMETER_MM: ${{ inputs.mount_diameter_mm }}
+          USABLE_DEPTH_MM: ${{ inputs.usable_depth_mm }}
+          MEASUREMENT_STATUS: ${{ inputs.measurement_status }}
+          PRINT_PRESET_NAME: ${{ inputs.print_preset_name }}
+          FIT_CLEARANCE_MM: ${{ inputs.fit_clearance_mm }}
+          MASK_THICKNESS_MM: ${{ inputs.mask_thickness_mm }}
+          RING_WALL_THICKNESS_MM: ${{ inputs.ring_wall_thickness_mm }}
+          REGION_GAP_MM: ${{ inputs.region_gap_mm }}
+          LEAD_IN_CHAMFER_MM: ${{ inputs.lead_in_chamfer_mm }}
+          OUTER_EDGE_RADIUS_MM: ${{ inputs.outer_edge_radius_mm }}
+          OUTER_FACE_FILLET_RADIUS_MM: ${{ inputs.outer_face_fillet_radius_mm }}
+          ENGRAVE_LABEL: ${{ inputs.engrave_label }}
         run: |
-          args=(
-            --focal-length-mm "${{ inputs.focal_length_mm }}"
-            --f-number "${{ inputs.f_number }}"
-            --mask-clear-diameter-mm "${{ inputs.mask_clear_diameter_mm }}"
-            --wavelength-nm "${{ inputs.wavelength_nm }}"
-            --pixel-pitch-um "${{ inputs.pixel_pitch_um }}"
-            --binning "${{ inputs.binning }}"
-            --focus-mode "${{ inputs.focus_mode }}"
-            --target-first-order-offset-px "${{ inputs.target_first_order_offset_px }}"
-            --minimum-slot-width-mm "${{ inputs.minimum_slot_width_mm }}"
-            --minimum-bar-width-mm "${{ inputs.minimum_bar_width_mm }}"
-            --side-groove-angle-deg "${{ inputs.side_groove_angle_deg }}"
-            --output-dir generated
-            --openscad "$RUNNER_TEMP/openscad-headless"
+          mkdir -p configuration
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from selflensbahtinov.assembly_config import (
+              MechanicalMount,
+              MechanicalProfile,
+              PrintPreset,
+              render_json,
+              slugify,
           )
 
-          if [[ -n "${{ inputs.filter_bandwidth_nm }}" ]]; then
-            args+=(
-              --filter-bandwidth-nm
-              "${{ inputs.filter_bandwidth_nm }}"
-            )
-          fi
+          def number(name):
+              try:
+                  return float(os.environ[name])
+              except ValueError as exc:
+                  raise SystemExit(f"{name} must be a valid number") from exc
 
-          if [[ -n "${{ inputs.expected_star_snr }}" ]]; then
-            args+=(
-              --expected-star-snr
-              "${{ inputs.expected_star_snr }}"
-            )
-          fi
+          manufacturer = os.environ["MANUFACTURER"].strip()
+          model = os.environ["MODEL"].strip()
+          profile = MechanicalProfile(
+              schema_version=3,
+              manufacturer=manufacturer,
+              model=model,
+              slug=slugify(f"{manufacturer}-{model}"),
+              label=os.environ["LABEL"].strip(),
+              mounts=(
+                  MechanicalMount(
+                      name=os.environ["MOUNT_NAME"].strip(),
+                      type=os.environ["MOUNT_TYPE"],
+                      diameter_mm=number("MOUNT_DIAMETER_MM"),
+                      usable_depth_mm=number("USABLE_DEPTH_MM"),
+                      status=os.environ["MEASUREMENT_STATUS"],
+                      preferred=True,
+                  ),
+              ),
+          )
+          preset = PrintPreset(
+              schema_version=1,
+              name=os.environ["PRINT_PRESET_NAME"].strip(),
+              fit_clearance_mm=number("FIT_CLEARANCE_MM"),
+              mask_thickness_mm=number("MASK_THICKNESS_MM"),
+              ring_wall_thickness_mm=number("RING_WALL_THICKNESS_MM"),
+              region_gap_mm=number("REGION_GAP_MM"),
+              lead_in_chamfer_mm=number("LEAD_IN_CHAMFER_MM"),
+              outer_edge_radius_mm=number("OUTER_EDGE_RADIUS_MM"),
+              outer_face_fillet_radius_mm=number("OUTER_FACE_FILLET_RADIUS_MM"),
+              engrave_label=os.environ["ENGRAVE_LABEL"].lower() == "true",
+          )
+          profile.validate()
+          preset.validate()
+          Path("configuration/mechanical-profile.json").write_text(
+              render_json(profile), encoding="utf-8"
+          )
+          Path("configuration/print-preset.json").write_text(
+              render_json(preset), encoding="utf-8"
+          )
+          PY
 
-          python -m selflensbahtinov.scientific_mask "${args[@]}"
+      - name: Assemble complete mask bundle
+        run: |
+          python -m selflensbahtinov.complete_mask assemble \
+            --scientific-contract "${{ steps.scientific-contract.outputs.path }}" \
+            --mechanical-profile configuration/mechanical-profile.json \
+            --print-preset configuration/print-preset.json \
+            --mount-name "${{ inputs.mount_name }}" \
+            --output-dir generated \
+            --openscad "$RUNNER_TEMP/openscad-headless" \
+            --confirm
 
-      - name: Publish scientific report in workflow summary
-        run: cat generated/bahtinov-design-report.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Show generated design contract
-        run: cat generated/bahtinov-optical-mask.json
+      - name: Publish assembly summary
+        run: cat generated/assembly-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: List generated files
-        run: |
-          find generated -maxdepth 1 -type f -printf "%f\n" | sort
+        run: find generated -maxdepth 1 -type f -printf "%f\n" | sort
 
-      - name: Upload report-derived optical mask bundle
+      - name: Upload complete mask bundle
         uses: actions/upload-artifact@v7
         with:
-          name: scientific-bahtinov-mask-${{ github.run_number }}
+          name: complete-bahtinov-mask-${{ github.run_id }}
           path: generated/
           if-no-files-found: error
           retention-days: 30
