@@ -26,17 +26,36 @@ def test_official_profile_catalog_is_schema_v3_only():
 
     assert {profile.slug for profile in profiles} == PROFILE_SLUGS
     assert all(profile.schema_version == 3 for profile in profiles)
-    assert all(profile.mounts == () for profile in profiles)
+    assert all(
+        mount.status in {"estimated", "measured", "verified"}
+        for profile in profiles
+        for mount in profile.mounts
+    )
 
 
 def test_official_unmeasured_profile_is_valid_but_not_assemblable():
     profile = load_mechanical_profile(
-        mechanical_profile_dir() / "fujifilm-xf100-400.json"
+        mechanical_profile_dir() / "fujifilm-xf16-80.json"
     )
 
     assert profile.is_complete is False
     with pytest.raises(ProfileValidationError, match="no measured mounting surface"):
         profile.select_mount()
+
+
+def test_official_measured_profile_is_ready_for_assembly():
+    profile = load_mechanical_profile(
+        mechanical_profile_dir() / "fujifilm-xf100-400.json"
+    )
+
+    assert profile.is_complete is True
+    mount = profile.select_mount()
+    assert mount.name == "hood-front-outer"
+    assert mount.type == "outer-slip-fit"
+    assert mount.diameter_mm == pytest.approx(92.6)
+    assert mount.usable_depth_mm == pytest.approx(8.0)
+    assert mount.status in {"measured", "verified"}
+    assert mount.preferred is True
 
 
 def test_schema_v2_is_rejected_without_migration(tmp_path: Path):
@@ -139,11 +158,13 @@ def test_cli_search_show_and_validate_use_v3_profiles(capsys):
     assert main(["search", "100-400"]) == 0
     search_output = capsys.readouterr().out
     assert "fujifilm-xf100-400" in search_output
-    assert "needs-measurement" in search_output
+    assert "\tready" in search_output
 
     assert main(["show", "fujifilm-xf100-400"]) == 0
     show_output = capsys.readouterr().out
-    assert "mounts: none measured yet" in show_output
+    assert "mount: hood-front-outer outer-slip-fit 92.600 mm" in show_output
+    assert "depth=8.000 mm" in show_output
+    assert "preferred" in show_output
 
     assert main(["validate", "fujifilm-xf100-400"]) == 0
     validate_output = capsys.readouterr().out
