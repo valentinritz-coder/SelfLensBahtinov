@@ -9,6 +9,7 @@ from selflensbahtinov.openscad import (
     output_path,
     supports_format,
 )
+from selflensbahtinov.slot_topology import remove_malformed_slots
 from selflensbahtinov.three_oclock_label import ThreeOClockLabelRenderer
 
 
@@ -23,7 +24,7 @@ def base_name(req: GenerationRequest, test_ring: bool = False) -> str:
 
 
 def geometry_for(req: GenerationRequest, test_ring: bool = False):
-    return calculate_mask(
+    geometry = calculate_mask(
         req.profile,
         AlgorithmOptions(
             mask_type=req.mask_type,
@@ -45,6 +46,7 @@ def geometry_for(req: GenerationRequest, test_ring: bool = False):
             outer_face_fillet_radius_mm=req.outer_face_fillet_radius_mm,
         ),
     )
+    return remove_malformed_slots(geometry)
 
 
 def _write_formats(req, base: Path, scad: str) -> list[Path]:
