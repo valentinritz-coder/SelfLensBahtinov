@@ -9,7 +9,7 @@ from selflensbahtinov.openscad import (
     output_path,
     supports_format,
 )
-from selflensbahtinov.label_cartridge import ParametricOpenScadRenderer
+from selflensbahtinov.solid_label_root import SolidRootOpenScadRenderer
 
 
 def base_name(req: GenerationRequest, test_ring: bool = False) -> str:
@@ -74,7 +74,7 @@ def _write_formats(req, base: Path, scad: str) -> list[Path]:
 def generate(req: GenerationRequest, *, test_ring: bool = False) -> list[Path]:
     geom = geometry_for(req, test_ring)
     req.output_dir.mkdir(parents=True, exist_ok=True) if not req.dry_run else None
-    renderer = ParametricOpenScadRenderer()
+    renderer = SolidRootOpenScadRenderer()
     base = req.output_dir / base_name(req, test_ring)
     return _write_formats(req, base, renderer.render_scad(geom))
 
@@ -85,7 +85,7 @@ def generate_label_cartridge(req: GenerationRequest) -> list[Path]:
     if geom.label is None:
         return []
     req.output_dir.mkdir(parents=True, exist_ok=True) if not req.dry_run else None
-    renderer = ParametricOpenScadRenderer()
+    renderer = SolidRootOpenScadRenderer()
     cartridge_base = req.output_dir / f"{base_name(req)}-label-cartridge"
     return _write_formats(
         req,
