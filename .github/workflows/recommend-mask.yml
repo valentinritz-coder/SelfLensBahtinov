@@ -152,6 +152,8 @@ jobs:
             )
           fi
 
+          # The complete-mask entry point now wraps the same report renderer formerly called as:
+          # python -m selflensbahtinov.design_report
           python -m selflensbahtinov.complete_mask "${args[@]}"
 
       - name: Publish report and next step
