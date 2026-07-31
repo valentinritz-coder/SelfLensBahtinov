@@ -1,39 +1,90 @@
 # Lens and hood measurements
 
-SelfLensBahtinov V1 supports smooth slip-fit caps only. Printed threads and screw-in mounts are intentionally out of scope. The bundled profiles intentionally have no recommended mount until the relevant barrel or hood diameter is measured. The nominal filter-thread size in a profile is product metadata; it is not necessarily the outside diameter of the lens barrel or hood.
+SelfLensBahtinov supports smooth slip-fit caps. Printed threads and screw-in mounts remain out of scope. A nominal filter-thread size is product metadata; it is not necessarily the outside diameter of the lens barrel or hood.
 
-Use digital calipers and measure in at least three rotational orientations. Record the largest value for outside slip-fit diameters, because the printed ring must clear the largest point.
+The preferred scientific-report assembly path records measurements in a schema-v3 mechanical profile. It deliberately stores only real mounting facts:
 
-## Lens barrel outer slip fit
+```json
+{
+  "schema_version": 3,
+  "manufacturer": "Fujifilm",
+  "model": "Fujinon XF100-400mmF4.5-5.6 R LM OIS WR",
+  "slug": "fujifilm-xf100-400",
+  "label": "XF100-400",
+  "mounts": [
+    {
+      "name": "hood-front-outer",
+      "type": "outer-slip-fit",
+      "diameter_mm": 92.6,
+      "usable_depth_mm": 8.0,
+      "status": "measured",
+      "preferred": true
+    }
+  ]
+}
+```
 
-Measure the outside diameter of the lens barrel at the intended mounting point. Confirm that the selected point does not move during zooming or focusing and does not cover controls, switches, focus rings, aperture rings, or lens extension seams.
+See [scientific-mask-action.md](scientific-mask-action.md) for the complete report, mechanical-profile, print-preset, and assembly workflow. The older schema-v2 lens profiles remain supported by the legacy CLI for compatibility, but new assembly data should use this simpler mechanical schema.
 
-Formula: `ring_inner_diameter = lens_barrel_outer_mm + 2 * radial_clearance_mm`.
+## General measurement method
 
-## Hood outer slip fit
+Use digital calipers and measure the intended mounting surface in at least three rotational orientations.
 
-Measure the outside diameter of the lens hood exactly where the mask ring will slide over the hood. Avoid flared, tapered, petal-cut, or textured areas unless that is the intended contact surface. Measure near the front rim and any rearward straight section you might use, then choose a straight cylindrical section with enough depth.
+- For an outside diameter, record the largest reading because the printed ring must clear the largest point.
+- For an inside diameter, measure at the actual axial insertion position.
+- Confirm that the contact surface is cylindrical and does not move during zooming or focusing.
+- Avoid controls, switches, moving rings, extension seams, bayonet tabs, petal edges, tapers, and heavily textured areas.
+- Measure the usable straight axial depth separately from the diameter.
 
-Formula: `ring_inner_diameter = hood_outer_mm + 2 * radial_clearance_mm`.
+## Outer slip fit
 
-## Hood inner slip fit
+Use `type: outer-slip-fit` when the mask slides over the outside of a lens barrel or hood.
 
-Measure the inside diameter of the hood opening at the axial location where the ring will insert. For this inner fit, radial clearance is subtracted from the printable outside of the skirt so it can enter the opening.
+Measure the outside diameter exactly where the skirt will grip. The generated nominal fit is:
 
-Formula: `ring_outer_diameter = hood_inner_mm - 2 * radial_clearance_mm`.
+```text
+ring_inner_diameter = measured_outer_diameter + 2 * radial_clearance
+```
 
-## Usable straight mounting depth
+The generic schema does not need separate `hood_outer_mm` and `lens_barrel_outer_mm` fields. Give the surface a clear name such as `hood-front-outer` or `fixed-barrel-outer`.
 
-Measure the axial length of straight, unobstructed surface available for the ring to grip. This value constrains `ring_depth_mm`. Leave clearance for hood bayonet tabs, lens caps, control rings, and any taper. If the straight section is shorter than the configured ring depth, reduce `ring_depth_mm` before generating the model.
+## Inner slip fit
 
-## Recommended workflow
+Use `type: inner-slip-fit` when the mask inserts into a measured hood opening.
 
-1. Measure each diameter in at least three orientations with digital calipers.
-2. Enter unknown profile dimensions only after measuring them; use `estimated` for rough dimensions that should be limited to test rings, `measured` for caliper measurements, and `verified` only after a printed test ring has fit the actual lens or hood.
-3. Set `recommended_mount` only for a physically recommended mount whose dimension is `measured` or `verified`.
-4. Generate a `generate-test-ring` model with the intended mount and clearance.
-5. Print the test ring before the full mask.
-6. Try a small clearance matrix such as 0.20 mm, 0.30 mm, 0.40 mm, and 0.50 mm, generating one ring at a time.
-7. Choose the smallest clearance that slips on securely without force.
+Measure the inside diameter at the intended insertion depth. The skirt outside diameter is:
 
-Real fit depends on printer calibration, material shrinkage, elephant foot, slicer settings, surface texture, and measurement accuracy.
+```text
+ring_outer_diameter = measured_inner_diameter - 2 * radial_clearance
+```
+
+The ring wall is then built inward from that outside diameter.
+
+## Usable mounting depth
+
+`usable_depth_mm` is the straight, unobstructed axial length available for the mounting skirt. It is a measured mechanical limit, not a stylistic preference.
+
+Leave room for bayonet tabs, tapers, lens caps, control rings, and moving sections. The complete mask uses this value as its skirt depth. The matching fit-test ring is intentionally capped at 4 mm so diameter and edge geometry can be checked cheaply before printing the full skirt.
+
+## Measurement status
+
+- `estimated`: rough or catalogue-derived value. It may generate a fit-test ring only.
+- `measured`: value taken with calipers on the actual lens or hood. It may generate a complete mask, but the fit-test ring should still be printed first.
+- `verified`: a printed test ring has physically fitted the actual mounting surface.
+
+Do not mark a catalogue dimension as verified merely because the internet presented it with several decimal places. Typography is not metrology.
+
+## Recommended physical workflow
+
+1. Complete and review the scientific report.
+2. Select one safe cylindrical mounting surface.
+3. Measure diameter in at least three orientations.
+4. Measure usable straight depth.
+5. Enter those values in the second assembly action.
+6. Review or edit the proposed print preset, especially radial clearance.
+7. Use `estimated` when uncertain so only a test ring is generated.
+8. Print and test the short ring.
+9. Change the status to `verified` after a successful physical fit.
+10. Generate and print the complete mask.
+
+A useful starting clearance matrix is 0.20, 0.30, 0.40, and 0.50 mm. Real fit depends on printer calibration, material shrinkage, elephant foot, slicer settings, surface texture, and measurement accuracy.
