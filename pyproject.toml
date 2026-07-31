@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "selflensbahtinov"
-version = "0.1.0"
-description = "Parametric OpenSCAD generator for camera-lens Bahtinov masks."
+version = "0.2.0"
+description = "Scientific Bahtinov design and schema-v3 mechanical mask assembly."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
