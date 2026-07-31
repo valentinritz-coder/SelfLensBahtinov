@@ -1,0 +1,125 @@
+name: Recommend Bahtinov mask parameters
+
+on:
+  workflow_dispatch:
+    inputs:
+      focal_length_mm:
+        description: Working focal length in millimetres
+        required: true
+        default: "400"
+        type: string
+
+      f_number:
+        description: Working aperture as an f-number, for example 5.6
+        required: true
+        default: "5.6"
+        type: string
+
+      mask_clear_diameter_mm:
+        description: Physical clear diameter available for the slotted mask pattern, in millimetres
+        required: true
+        default: "76.7"
+        type: string
+
+      wavelength_nm:
+        description: Reference or filter central wavelength in nanometres
+        required: true
+        default: "550"
+        type: string
+
+      pixel_pitch_um:
+        description: Native sensor pixel pitch in micrometres
+        required: true
+        default: "3.76"
+        type: string
+
+      binning:
+        description: Sensor binning factor
+        required: true
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "3"
+          - "4"
+
+      target_first_order_offset_px:
+        description: Desired first-order diffraction distance from the stellar core, in effective pixels
+        required: true
+        default: "20"
+        type: string
+
+      minimum_slot_width_mm:
+        description: Smallest reliably printable open slot width, in millimetres
+        required: true
+        default: "0.8"
+        type: string
+
+      minimum_bar_width_mm:
+        description: Smallest reliably printable opaque bar width, in millimetres
+        required: true
+        default: "0.8"
+        type: string
+
+      side_groove_angle_deg:
+        description: Angle of each side groove family relative to the central grooves, in degrees
+        required: true
+        default: "20"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  recommend:
+    name: Generate scientific recommendation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install project and tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+
+      - name: Compile Python sources
+        run: python -m compileall -q src tests
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Generate Markdown recommendation
+        run: |
+          python -m selflensbahtinov.design_report \
+            --focal-length-mm "${{ inputs.focal_length_mm }}" \
+            --f-number "${{ inputs.f_number }}" \
+            --mask-clear-diameter-mm "${{ inputs.mask_clear_diameter_mm }}" \
+            --wavelength-nm "${{ inputs.wavelength_nm }}" \
+            --pixel-pitch-um "${{ inputs.pixel_pitch_um }}" \
+            --binning "${{ inputs.binning }}" \
+            --target-first-order-offset-px "${{ inputs.target_first_order_offset_px }}" \
+            --minimum-slot-width-mm "${{ inputs.minimum_slot_width_mm }}" \
+            --minimum-bar-width-mm "${{ inputs.minimum_bar_width_mm }}" \
+            --side-groove-angle-deg "${{ inputs.side_groove_angle_deg }}" \
+            --output generated/bahtinov-design-report.md
+
+      - name: Publish report in workflow summary
+        run: cat generated/bahtinov-design-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Markdown report
+        uses: actions/upload-artifact@v7
+        with:
+          name: bahtinov-design-report-${{ github.run_number }}
+          path: generated/bahtinov-design-report.md
+          if-no-files-found: error
+          retention-days: 30
