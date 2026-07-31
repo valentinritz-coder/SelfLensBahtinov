@@ -27,6 +27,12 @@ on:
         default: "550"
         type: string
 
+      filter_bandwidth_nm:
+        description: Optional full filter bandwidth in nanometres; empty keeps a monochromatic estimate
+        required: false
+        default: ""
+        type: string
+
       pixel_pitch_um:
         description: Native sensor pixel pitch in micrometres
         required: true
@@ -43,6 +49,21 @@ on:
           - "2"
           - "3"
           - "4"
+
+      focus_mode:
+        description: Intended focus-reading method
+        required: true
+        default: visual
+        type: choice
+        options:
+          - visual
+          - software-assisted
+
+      expected_star_snr:
+        description: Optional expected stellar signal-to-noise ratio for software-assisted interpretation
+        required: false
+        default: ""
+        type: string
 
       target_first_order_offset_px:
         description: Desired first-order diffraction distance from the stellar core, in effective pixels
@@ -99,19 +120,38 @@ jobs:
         run: pytest -q
 
       - name: Generate Markdown recommendation
+        shell: bash
         run: |
-          python -m selflensbahtinov.design_report \
-            --focal-length-mm "${{ inputs.focal_length_mm }}" \
-            --f-number "${{ inputs.f_number }}" \
-            --mask-clear-diameter-mm "${{ inputs.mask_clear_diameter_mm }}" \
-            --wavelength-nm "${{ inputs.wavelength_nm }}" \
-            --pixel-pitch-um "${{ inputs.pixel_pitch_um }}" \
-            --binning "${{ inputs.binning }}" \
-            --target-first-order-offset-px "${{ inputs.target_first_order_offset_px }}" \
-            --minimum-slot-width-mm "${{ inputs.minimum_slot_width_mm }}" \
-            --minimum-bar-width-mm "${{ inputs.minimum_bar_width_mm }}" \
-            --side-groove-angle-deg "${{ inputs.side_groove_angle_deg }}" \
+          args=(
+            --focal-length-mm "${{ inputs.focal_length_mm }}"
+            --f-number "${{ inputs.f_number }}"
+            --mask-clear-diameter-mm "${{ inputs.mask_clear_diameter_mm }}"
+            --wavelength-nm "${{ inputs.wavelength_nm }}"
+            --pixel-pitch-um "${{ inputs.pixel_pitch_um }}"
+            --binning "${{ inputs.binning }}"
+            --focus-mode "${{ inputs.focus_mode }}"
+            --target-first-order-offset-px "${{ inputs.target_first_order_offset_px }}"
+            --minimum-slot-width-mm "${{ inputs.minimum_slot_width_mm }}"
+            --minimum-bar-width-mm "${{ inputs.minimum_bar_width_mm }}"
+            --side-groove-angle-deg "${{ inputs.side_groove_angle_deg }}"
             --output generated/bahtinov-design-report.md
+          )
+
+          if [[ -n "${{ inputs.filter_bandwidth_nm }}" ]]; then
+            args+=(
+              --filter-bandwidth-nm
+              "${{ inputs.filter_bandwidth_nm }}"
+            )
+          fi
+
+          if [[ -n "${{ inputs.expected_star_snr }}" ]]; then
+            args+=(
+              --expected-star-snr
+              "${{ inputs.expected_star_snr }}"
+            )
+          fi
+
+          python -m selflensbahtinov.design_report "${args[@]}"
 
       - name: Publish report in workflow summary
         run: cat generated/bahtinov-design-report.md >> "$GITHUB_STEP_SUMMARY"
