@@ -1,82 +1,131 @@
 # SelfLensBahtinov
 
-SelfLensBahtinov V1 is a focused Python CLI for generating reproducible, printable Bahtinov and TriBahtinov focusing masks for camera lenses. Python owns the optical and pattern calculations; OpenSCAD is currently the rendering/export backend for SCAD, STL, and 3MF.
-
-## Scope
-
-V1 supports exactly:
-
-- Mask algorithms: Bahtinov and TriBahtinov.
-- Output formats: `.scad`, `.stl`, and `.3mf`.
-- Smooth slip-fit mounting only: `lens-barrel-outer-slip-fit`, `hood-outer-slip-fit`, and `hood-inner-slip-fit`.
-- Local JSON profiles only; there is no database, network registry, plugin system, GUI, slicer automation, printed thread generator, screw mount, or generic CAD framework.
-
-Printed threads are intentionally out of scope for V1. The deprecated CLI value `filter-thread` is accepted only as a temporary compatibility alias for `lens-barrel-outer-slip-fit` and prints a warning. It does not create a threaded or screw-in mount.
-
-## Mounting model
-
-For a Bahtinov mask, the preferred physical design is a removable cap that slips on and off quickly in the dark. Prefer the outside of the lens hood (`hood-outer-slip-fit`) or the outside of the lens barrel (`lens-barrel-outer-slip-fit`) when there is a straight, safe cylindrical surface. `hood-inner-slip-fit` is available when you deliberately want the ring to fit inside a measured hood opening.
-
-Profiles store `filter_thread_nominal_mm` only as product metadata. A nominal filter-thread size is not necessarily the outside diameter of the lens barrel or hood, and SelfLensBahtinov does not reinterpret it as a printable thread, barrel diameter, or hood diameter.
-
-Clearance is configurable radial clearance in millimetres:
-
-- Outer slip fit over a lens barrel or hood: `ring_inner_diameter = measured_outer_diameter + 2 * radial_clearance`.
-- Inner slip fit inside a hood opening: radial clearance reduces the printable outside diameter of the skirt, so `ring_outer_diameter = measured_hood_inner_diameter - 2 * radial_clearance`.
-
-Real fit depends on printer calibration, material shrinkage, elephant foot, slicer settings, surface texture, and measurement accuracy.
-
-
-### Production mounting-ring edge geometry
-
-The production mounting skirt is generated from one Python-owned radial/z cross-section that is rendered to SCAD and then exported to STL and 3MF. The fit-test ring and complete mask use the same mounting cross-section, so a test ring remains a valid mechanical proxy for the final mask.
-
-The axial overlap/engagement length on the lens barrel or hood is controlled by `ring_depth_mm` in a profile and can be overridden during generation with `--ring-depth <mm>`. Fit-test rings intentionally stay short and cap this depth at 4.0 mm, so they validate diameter and edge geometry without printing a full-depth skirt.
-
-Two manufacturing/ergonomic defaults are applied unless a profile or CLI override changes them:
-
-- `lead_in_chamfer_mm = 1.0`: adds an internal lead-in on the mounting-entry side. The entry side is the negative-Z/bottom side of the mounting skirt: the side first presented to the barrel or hood. The chamfer flares only the entry edge outward; deeper inside the ring the straight cylindrical engagement still uses the nominal slip-fit diameter, so it guides insertion without loosening the final fit. Set `--lead-in-chamfer 0` to disable it.
-- `outer_edge_radius_mm = 0.5`: applies a deterministic support-free faceted edge treatment to exposed outside skirt edges to remove sharp handling edges and reduce burr/chip sensitivity. Set `--outer-edge-radius 0` to disable it.
-
-Validation rejects non-finite, negative, self-intersecting, or mechanically incompatible values. The lead-in must leave at least 2.0 mm of straight cylindrical engagement and must be smaller than the ring height. The outer edge radius must fit within both the wall thickness and the ring height. The nominal mounting diameter, radial clearance, and resulting internal fit diameter remain separate from both edge-treatment parameters.
-
-Recommended print orientation: place the mounting ring flat on the build plate with the negative-Z mounting-entry side down. This keeps the skirt stable, prints the 45° lead-in without supports, and leaves the diffraction slots in the intended face orientation.
+SelfLensBahtinov generates printable Bahtinov masks by composing three independent inputs:
 
 ```text
-        external rounded edge
-              ╭──────
-             /       │
-entry  →    /        │  straight cylindrical engagement at nominal fit diameter
-           │         │
-           │         │
-           └─────────┘
+Scientific report  -> optical grating
+Mechanical profile -> mounting diameter and usable depth
+Print preset       -> clearance, thicknesses, and edge treatment
+All three          -> complete mask, fit-test ring, and label cartridge
 ```
 
-CLI example with explicit manufacturing overrides:
+The project generates SCAD, STL, and 3MF when the installed OpenSCAD version supports the requested export.
 
-```powershell
-selflensbahtinov generate-test-ring fujifilm-xf100-400 `
-  --mount lens-barrel-outer-slip-fit `
-  --clearance 0.35 `
-  --lead-in-chamfer 1.0 `
-  --outer-edge-radius 0.5 `
-  --format stl
+## Profile schema
+
+Mechanical profiles use **schema version 3 only**. Schema versions 1 and 2, their migration code, and the former combined optical/mechanical/default profile format have been removed.
+
+A profile now describes only the physical surface on which the mask mounts:
+
+```json
+{
+  "schema_version": 3,
+  "manufacturer": "Fujifilm",
+  "model": "Fujinon XF100-400mmF4.5-5.6 R LM OIS WR",
+  "slug": "fujifilm-xf100-400",
+  "label": "XF100-400",
+  "mounts": [
+    {
+      "name": "hood-front-outer",
+      "type": "outer-slip-fit",
+      "diameter_mm": 92.6,
+      "usable_depth_mm": 8.0,
+      "status": "measured",
+      "preferred": true
+    }
+  ]
+}
 ```
 
-## Setup on Windows PowerShell
+Official catalog profiles live in `mechanical-profiles/`. Bundled profiles with no trustworthy physical measurement contain an empty `mounts` array. They can be searched and completed, but cannot generate a ring or mask until a mounting surface is measured.
+
+### Mount fields
+
+| Field | Meaning |
+|---|---|
+| `name` | Human-readable name of the exact measured surface |
+| `type` | `outer-slip-fit` or `inner-slip-fit` |
+| `diameter_mm` | Physical caliper measurement at the mounting position |
+| `usable_depth_mm` | Straight unobstructed axial length available for the skirt |
+| `status` | `estimated`, `measured`, or `verified` |
+| `preferred` | Default surface when several mounts exist |
+
+`estimated` may generate a short fit-test ring only. `measured` may generate a complete mask after explicit confirmation. `verified` means a printed test ring has already fitted the actual lens or hood.
+
+## Print presets
+
+Printer- and material-dependent choices live separately in `print-presets/`:
+
+```json
+{
+  "schema_version": 1,
+  "name": "default-pla",
+  "fit_clearance_mm": 0.35,
+  "mask_thickness_mm": 2.0,
+  "ring_wall_thickness_mm": 3.0,
+  "region_gap_mm": 2.0,
+  "lead_in_chamfer_mm": 1.0,
+  "outer_edge_radius_mm": 0.5,
+  "outer_face_fillet_radius_mm": 0.0,
+  "engrave_label": true
+}
+```
+
+These values are proposed manufacturing settings, not lens measurements and not optical constants.
+
+## GitHub Actions workflow
+
+### 1. Recommend Bahtinov mask parameters
+
+Run **Recommend Bahtinov mask parameters** and provide the scientific inputs:
+
+- focal length and working f-number;
+- physical clear diameter reserved for the grating;
+- wavelength and optional filter bandwidth;
+- sensor pixel pitch and binning;
+- visual or software-assisted focus mode;
+- requested first-order offset;
+- minimum printable slot and bar widths;
+- side-grating angle.
+
+The artifact contains:
+
+- `bahtinov-design-report.md`;
+- `bahtinov-scientific-design.json`;
+- `mechanical-profile.template.json`;
+- `print-preset.proposed.json`;
+- `next-step.md`.
+
+The workflow summary displays the report run ID.
+
+### 2. Assemble complete mask from scientific report
+
+Run **Assemble complete mask from scientific report** with the prior run ID. Review the scientific report, enter or validate the mechanical measurement, review the print preset, and check the explicit confirmation box.
+
+For a measured or verified mount, the artifact contains:
+
+- complete mask in SCAD, STL, and 3MF when supported;
+- matching short fit-test ring;
+- matching rear-loading label cartridge when enabled;
+- normalized scientific, mechanical, print, and assembly JSON contracts;
+- Markdown reports and summaries.
+
+A report workflow cannot pause and dynamically open a second arbitrary form, so review and assembly deliberately use two runs.
+
+## CLI setup
 
 ```powershell
-git clone <repo-url>
-cd SelfLensBahtinov
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-Install OpenSCAD separately from <https://openscad.org/>. If `openscad.exe` is not on `PATH`, pass it with `--openscad "C:\Program Files\OpenSCAD\openscad.exe"`.
+Install OpenSCAD separately. If it is not available on `PATH`, pass its executable with `--openscad` during assembly.
 
-## CLI usage
+## Mechanical profile commands
+
+Search and inspect the official catalog:
 
 ```powershell
 selflensbahtinov search Fuji
@@ -84,104 +133,96 @@ selflensbahtinov show fujifilm-xf100-400
 selflensbahtinov validate fujifilm-xf100-400
 ```
 
-Generate a fit-test ring before printing a full mask:
+Create a new empty profile:
 
 ```powershell
-selflensbahtinov generate-test-ring fujifilm-xf100-400 `
-  --mount lens-barrel-outer-slip-fit `
-  --clearance 0.35 `
-  --format 3mf
+selflensbahtinov create-profile `
+  --manufacturer Fujifilm `
+  --model "Fujinon XF100-400mmF4.5-5.6 R LM OIS WR" `
+  --label XF100-400 `
+  --output mechanical-profiles/fujifilm-xf100-400.json
 ```
 
-Generate Bahtinov SCAD, STL, and 3MF:
+Add a measured mounting surface:
 
 ```powershell
-selflensbahtinov generate fujifilm-xf100-400 `
-  --mount hood-outer-slip-fit `
-  --clearance 0.35 `
-  --format scad `
-  --format stl `
-  --format 3mf
+selflensbahtinov add-mount fujifilm-xf100-400 `
+  --name hood-front-outer `
+  --type outer-slip-fit `
+  --diameter-mm 92.6 `
+  --usable-depth-mm 8.0 `
+  --status measured `
+  --preferred
 ```
 
-Generate TriBahtinov outputs:
+Measure with digital calipers in at least three rotational orientations. For an outside fit, record the largest reading. Print the short test ring before trusting a full-depth skirt, because plastic remains unimpressed by confident JSON.
+
+## Print preset commands
 
 ```powershell
-selflensbahtinov generate fujifilm-xf100-400 --mask tribahtinov --mount hood-outer-slip-fit --format scad --format stl --format 3mf
+selflensbahtinov presets
+selflensbahtinov show-preset default-pla
+selflensbahtinov validate-preset default-pla
 ```
 
-Generate the V1 bundle: selected full mask plus matching test ring in SCAD/STL and 3MF when supported.
+## Local scientific report
 
 ```powershell
-selflensbahtinov generate-bundle fujifilm-xf16-80 --mask bahtinov --mount hood-outer-slip-fit
+selflensbahtinov prepare-report `
+  --focal-length-mm 400 `
+  --f-number 5.6 `
+  --mask-clear-diameter-mm 76.7 `
+  --pixel-pitch-um 3.76 `
+  --side-groove-angle-deg 20 `
+  --output-dir generated-report
 ```
 
-Example output filenames include:
-
-- `fujifilm-xf100-400-bahtinov-hood-outer-slip-fit.3mf`
-- `fujifilm-xf100-400-test-ring-lens-barrel-outer-slip-fit.3mf`
-
-## Profile model
-
-Profiles use schema version 2 and strict validation. Mounting dimensions are explicit measured values with measurement status. Bundled profiles intentionally have no recommended or default mount until measured:
-
-```json
-{
-  "mounting": {
-    "filter_thread_nominal_mm": 77.0,
-    "lens_barrel_outer_mm": null,
-    "lens_barrel_outer_status": "unknown",
-    "hood_outer_mm": null,
-    "hood_outer_status": "unknown",
-    "hood_inner_mm": null,
-    "hood_inner_status": "unknown",
-    "recommended_mount": null
-  }
-}
-```
-
-Unknown dimensions remain `null` with status `unknown`. A non-null dimension may be `estimated`, `measured`, or `verified`; `estimated` can be used for test-ring generation only, while `measured` and `verified` can be used for full masks. `recommended_mount` and `defaults.mount_type` may only point to a dimension whose status is `measured` or `verified`. `recommended_mount` means physically recommended and measured, not merely preferred in theory. `verified` means the fit has been physically tested with a printed ring on the actual lens or hood. Selecting a mount whose required physical dimension is `null` fails clearly. Deprecated schema-version-1 profiles are migrated to the version-2 in-memory model with old filter-thread recommendations/defaults cleared rather than treated as real barrel measurements.
-
-### Front-face outer fillet
-
-Use `--outer-face-fillet-radius <mm>` to add a rounded circular fillet to the outside edge where the slotted front face meets the mask outside diameter. The default is `0.0`, which disables the feature and preserves the existing geometry. A positive value removes material inside the requested nominal outside diameter; it does not enlarge the mask, change the mounting fit diameters, reduce the useful optical aperture, or round individual grating slots. Fit-test rings do not include the full slotted front face, so this front-face fillet is only applied to complete masks.
-
-Validation rejects negative or non-finite radii and radii larger than the available front-face thickness or radial rim between the outside diameter and useful aperture.
-
-Example with an 8.0 mm skirt depth and a 1.0 mm outside front-face fillet:
+## Local assembly
 
 ```powershell
-selflensbahtinov generate fujifilm-xf100-400 `
-  --mount lens-barrel-outer-slip-fit `
-  --clearance 0.35 `
-  --ring-depth 8.0 `
-  --outer-face-fillet-radius 1.0 `
-  --format scad `
-  --format stl `
-  --format 3mf
+selflensbahtinov assemble `
+  --scientific-contract generated-report/bahtinov-scientific-design.json `
+  --mechanical-profile fujifilm-xf100-400 `
+  --print-preset default-pla `
+  --mount-name hood-front-outer `
+  --output-dir generated `
+  --confirm
 ```
 
-The generation flow is:
+## Measurement formulas
+
+For an outer slip fit:
 
 ```text
-LensProfile -> generation options -> MaskAlgorithm -> MaskGeometry -> OpenScadRenderer -> SCAD / STL / 3MF
+ring_inner_diameter = measured_outer_diameter + 2 * radial_clearance
 ```
 
-See `docs/bahtinov-algorithm.md` for the mathematical model.
+For an inner slip fit:
 
-## Measurements and test-ring workflow
+```text
+ring_outer_diameter = measured_inner_diameter - 2 * radial_clearance
+```
 
-Before generating a mask, measure the intended mounting surface with calipers, edit the profile, and select the corresponding `--mount` option. Print a short test ring first; this remains the mandatory first physical validation step. A useful clearance matrix is 0.20 mm, 0.30 mm, 0.40 mm, and 0.50 mm. Generate those rings one at a time unless a future dedicated matrix option is added. See [docs/measurements.md](docs/measurements.md).
+The nominal filter-thread size is not used as either measurement and is no longer part of the profile schema.
 
-Run tests:
+See:
+
+- `docs/measurements.md` for physical measurement guidance;
+- `docs/scientific-design-report.md` for the optical model;
+- `docs/scientific-mask-action.md` for the two-stage assembly flow;
+- `docs/bahtinov-algorithm.md` for generated grating geometry.
+
+## Current scope
+
+- Bahtinov report and complete lens-mounted Bahtinov assembly;
+- smooth outer and inner slip fits;
+- schema-v3 mechanical profiles only;
+- independent print presets;
+- SCAD, STL, and 3MF output when supported;
+- no printed threads, screw mounts, GUI, network profile registry, or slicer automation.
+
+Run the tests with:
 
 ```powershell
-pytest
+pytest -q
 ```
-
-## Current limitations
-
-- V1 supports smooth slip-fit caps only.
-- Printed threads and screw-in mounting are intentionally not implemented.
-- Hood and barrel dimensions for bundled lenses are unknown until measured.
-- 3MF export depends on OpenSCAD capability.

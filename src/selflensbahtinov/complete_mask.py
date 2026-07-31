@@ -75,10 +75,16 @@ class CompleteMaskBuild:
     pattern_border_mm: float
 
 
-def _recommendation_payload(recommendation: DesignRecommendation) -> dict[str, Any]:
+def _recommendation_payload(
+    recommendation: DesignRecommendation,
+) -> dict[str, Any]:
     return {
-        "estimated_entrance_pupil_diameter_mm": recommendation.optical_aperture_diameter_mm,
-        "illuminated_mask_diameter_mm": recommendation.illuminated_mask_diameter_mm,
+        "estimated_entrance_pupil_diameter_mm": (
+            recommendation.optical_aperture_diameter_mm
+        ),
+        "illuminated_mask_diameter_mm": (
+            recommendation.illuminated_mask_diameter_mm
+        ),
         "optical_pitch_mm": recommendation.optical_pitch_mm,
         "printable_pitch_mm": recommendation.printable_pitch_mm,
         "slot_width_mm": recommendation.slot_width_mm,
@@ -93,7 +99,9 @@ def _recommendation_payload(recommendation: DesignRecommendation) -> dict[str, A
     }
 
 
-def render_scientific_contract(recommendation: DesignRecommendation) -> str:
+def render_scientific_contract(
+    recommendation: DesignRecommendation,
+) -> str:
     payload = {
         "schema_version": _SCIENTIFIC_CONTRACT_VERSION,
         "kind": "bahtinov-scientific-design",
@@ -108,11 +116,15 @@ def load_scientific_contract(path: Path) -> DesignRecommendation:
     if payload.get("schema_version") != _SCIENTIFIC_CONTRACT_VERSION:
         raise ValueError("scientific contract schema_version must be 1")
     if payload.get("kind") != "bahtinov-scientific-design":
-        raise ValueError("scientific contract kind must be bahtinov-scientific-design")
+        raise ValueError(
+            "scientific contract kind must be bahtinov-scientific-design"
+        )
     raw_inputs = payload.get("inputs")
     recorded = payload.get("recommendation")
     if not isinstance(raw_inputs, dict) or not isinstance(recorded, dict):
-        raise ValueError("scientific contract must contain inputs and recommendation objects")
+        raise ValueError(
+            "scientific contract must contain inputs and recommendation objects"
+        )
     inputs = DesignInputs(**raw_inputs)
     result = recommend(inputs)
     current = _recommendation_payload(result)
@@ -120,17 +132,26 @@ def load_scientific_contract(path: Path) -> DesignRecommendation:
         expected = recorded.get(field)
         actual = current[field]
         if not isinstance(expected, (int, float)) or not math.isclose(
-            float(expected), float(actual), rel_tol=1e-9, abs_tol=1e-9
+            float(expected),
+            float(actual),
+            rel_tol=1e-9,
+            abs_tol=1e-9,
         ):
             raise ValueError(
                 f"scientific contract recommendation drift detected for {field}"
             )
-    if recorded.get("side_groove_angle_deg") != current["side_groove_angle_deg"]:
-        raise ValueError("scientific contract side-groove angle does not match its inputs")
+    if recorded.get("side_groove_angle_deg") != current[
+        "side_groove_angle_deg"
+    ]:
+        raise ValueError(
+            "scientific contract side-groove angle does not match its inputs"
+        )
     return result
 
 
-def _next_step_markdown(recommendation: DesignRecommendation) -> str:
+def _next_step_markdown(
+    recommendation: DesignRecommendation,
+) -> str:
     return "\n".join(
         [
             "# Next step: assemble the real mask",
@@ -158,7 +179,11 @@ def _next_step_markdown(recommendation: DesignRecommendation) -> str:
     )
 
 
-def prepare_report_bundle(inputs: DesignInputs, *, output_dir: Path) -> list[Path]:
+def prepare_report_bundle(
+    inputs: DesignInputs,
+    *,
+    output_dir: Path,
+) -> list[Path]:
     recommendation = recommend(inputs)
     output_dir.mkdir(parents=True, exist_ok=True)
     report = output_dir / "bahtinov-design-report.md"
@@ -166,8 +191,12 @@ def prepare_report_bundle(inputs: DesignInputs, *, output_dir: Path) -> list[Pat
     profile_template = output_dir / "mechanical-profile.template.json"
     print_preset = output_dir / "print-preset.proposed.json"
     next_step = output_dir / "next-step.md"
+
     report.write_text(render_markdown(recommendation), encoding="utf-8")
-    contract.write_text(render_scientific_contract(recommendation), encoding="utf-8")
+    contract.write_text(
+        render_scientific_contract(recommendation),
+        encoding="utf-8",
+    )
     profile_template.write_text(
         json.dumps(
             mechanical_profile_template(
@@ -179,8 +208,14 @@ def prepare_report_bundle(inputs: DesignInputs, *, output_dir: Path) -> list[Pat
         + "\n",
         encoding="utf-8",
     )
-    print_preset.write_text(render_json(proposed_print_preset()), encoding="utf-8")
-    next_step.write_text(_next_step_markdown(recommendation), encoding="utf-8")
+    print_preset.write_text(
+        render_json(proposed_print_preset()),
+        encoding="utf-8",
+    )
+    next_step.write_text(
+        _next_step_markdown(recommendation),
+        encoding="utf-8",
+    )
     return [report, contract, profile_template, print_preset, next_step]
 
 
@@ -242,7 +277,9 @@ def _filtered_slots(
         GratingRegion.RIGHT_LOWER,
     }
     if {slot.region for slot in retained} != required:
-        raise ValueError("slot cleanup removed every slot from a required region")
+        raise ValueError(
+            "slot cleanup removed every slot from a required region"
+        )
     return retained
 
 
@@ -255,7 +292,8 @@ def _internal_mount_type(mount: MechanicalMount) -> MountType:
 
 
 def _available_ring_inner_diameter(
-    mount: MechanicalMount, preset: PrintPreset
+    mount: MechanicalMount,
+    preset: PrintPreset,
 ) -> float:
     if mount.type == "inner-slip-fit":
         return (
@@ -266,12 +304,13 @@ def _available_ring_inner_diameter(
     return mount.diameter_mm + 2 * preset.fit_clearance_mm
 
 
-def _legacy_profile(
+def _geometry_profile(
     mechanical: MechanicalProfile,
     mount: MechanicalMount,
     preset: PrintPreset,
     scientific: DesignRecommendation,
 ) -> LensProfile:
+    """Compose the internal geometry view from the three public contracts."""
     mount_type = _internal_mount_type(mount)
     mounting_kwargs: dict[str, Any] = {
         "filter_thread_nominal_mm": None,
@@ -289,10 +328,11 @@ def _legacy_profile(
     else:
         mounting_kwargs["lens_barrel_outer_mm"] = mount.diameter_mm
         mounting_kwargs["lens_barrel_outer_status"] = mount.status
+
     focal = scientific.inputs.focal_length_mm
     aperture = scientific.inputs.f_number
     return LensProfile(
-        schema_version=2,
+        schema_version=3,
         manufacturer=mechanical.manufacturer,
         model=mechanical.model,
         slug=mechanical.slug,
@@ -311,11 +351,13 @@ def _legacy_profile(
             engrave_label=preset.engrave_label,
             lead_in_chamfer_mm=preset.lead_in_chamfer_mm,
             outer_edge_radius_mm=preset.outer_edge_radius_mm,
-            outer_face_fillet_radius_mm=preset.outer_face_fillet_radius_mm,
+            outer_face_fillet_radius_mm=(
+                preset.outer_face_fillet_radius_mm
+            ),
         ),
         label=mechanical.label,
         notes=(
-            "Generated from a schema-v3 mechanical profile through the compatibility adapter.",
+            "Internal geometry view composed from scientific, mechanical, and print contracts.",
         ),
     )
 
@@ -385,7 +427,8 @@ def build_complete_mask(
             "mechanical mounting geometry leaves less clear diameter than the scientific report requires: "
             f"available={available_inner:.3f} mm required={clear_diameter:.3f} mm"
         )
-    profile = _legacy_profile(mechanical, mount, preset, scientific)
+
+    profile = _geometry_profile(mechanical, mount, preset, scientific)
     ring_options = _options(
         profile=profile,
         mount=mount,
@@ -395,6 +438,7 @@ def build_complete_mask(
         test_ring=True,
     )
     test_ring = calculate_mask(profile, ring_options)
+
     full: MaskGeometry | None = None
     if mount.status != "estimated":
         full_options = replace(ring_options, test_ring=False)
@@ -412,6 +456,7 @@ def build_complete_mask(
             slots=slots,
             grating=_scientific_grating_metadata(scientific),
         )
+
     return CompleteMaskBuild(
         scientific=scientific,
         mechanical_profile=mechanical,
@@ -435,6 +480,7 @@ def _write_scad_and_exports(
     outputs = [scad_path]
     if scad_only:
         return outputs
+
     stl_path = base.with_suffix(".stl")
     export(openscad, scad_path, stl_path)
     outputs.append(stl_path)
@@ -460,7 +506,8 @@ def _assembly_payload(build: CompleteMaskBuild) -> dict[str, Any]:
             "pattern_border_mm": build.pattern_border_mm,
             "full_mask_generated": build.full_geometry is not None,
             "label_cartridge_generated": bool(
-                build.full_geometry is not None and build.full_geometry.label is not None
+                build.full_geometry is not None
+                and build.full_geometry.label is not None
             ),
         },
     }
@@ -516,6 +563,7 @@ def assemble_bundle(
         raise ValueError(
             "assembly requires explicit confirmation that the scientific report and proposed print settings were reviewed"
         )
+
     scientific = load_scientific_contract(scientific_contract)
     mechanical = load_mechanical_profile(mechanical_profile)
     preset = load_print_preset(print_preset)
@@ -525,18 +573,24 @@ def assemble_bundle(
         preset,
         mount_name=mount_name,
     )
+
     output_dir.mkdir(parents=True, exist_ok=True)
     renderer = ThreeOClockLabelRenderer()
     stem = f"{mechanical.slug}-{slugify(build.mount.name)}"
     outputs: list[Path] = []
+
     copied_report = output_dir / "bahtinov-design-report.md"
     copied_contract = output_dir / "bahtinov-scientific-design.json"
     copied_profile = output_dir / "mechanical-profile.json"
     copied_preset = output_dir / "print-preset.json"
     assembly_contract = output_dir / "mask-assembly.json"
     summary = output_dir / "assembly-summary.md"
+
     copied_report.write_text(render_markdown(scientific), encoding="utf-8")
-    copied_contract.write_text(render_scientific_contract(scientific), encoding="utf-8")
+    copied_contract.write_text(
+        render_scientific_contract(scientific),
+        encoding="utf-8",
+    )
     copied_profile.write_text(render_json(mechanical), encoding="utf-8")
     copied_preset.write_text(render_json(preset), encoding="utf-8")
     assembly_contract.write_text(
@@ -554,6 +608,7 @@ def assemble_bundle(
             summary,
         ]
     )
+
     outputs.extend(
         _write_scad_and_exports(
             base=output_dir / f"{stem}-fit-test-ring",
@@ -575,7 +630,9 @@ def assemble_bundle(
             outputs.extend(
                 _write_scad_and_exports(
                     base=output_dir / f"{stem}-label-cartridge",
-                    scad=renderer.render_label_cartridge_scad(build.full_geometry),
+                    scad=renderer.render_label_cartridge_scad(
+                        build.full_geometry
+                    ),
                     openscad=openscad,
                     scad_only=scad_only,
                 )
@@ -597,7 +654,11 @@ def _add_scientific_args(parser: argparse.ArgumentParser) -> None:
         default="visual",
     )
     parser.add_argument("--expected-star-snr", type=float)
-    parser.add_argument("--target-first-order-offset-px", type=float, default=20.0)
+    parser.add_argument(
+        "--target-first-order-offset-px",
+        type=float,
+        default=20.0,
+    )
     parser.add_argument("--minimum-slot-width-mm", type=float, default=0.8)
     parser.add_argument("--minimum-bar-width-mm", type=float, default=0.8)
     parser.add_argument("--side-groove-angle-deg", type=float, default=20.0)
@@ -623,12 +684,17 @@ def _inputs_from_args(args: argparse.Namespace) -> DesignInputs:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Prepare a scientific design contract or assemble a complete mounted mask."
+        description=(
+            "Prepare a scientific design contract or assemble a complete "
+            "mounted mask."
+        )
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
     prepare = sub.add_parser("prepare-report")
     _add_scientific_args(prepare)
     prepare.add_argument("--output-dir", type=Path, default=Path("generated"))
+
     assemble = sub.add_parser("assemble")
     assemble.add_argument("--scientific-contract", type=Path, required=True)
     assemble.add_argument("--mechanical-profile", type=Path, required=True)
@@ -646,7 +712,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "prepare-report":
             outputs = prepare_report_bundle(
-                _inputs_from_args(args), output_dir=args.output_dir
+                _inputs_from_args(args),
+                output_dir=args.output_dir,
             )
         else:
             outputs = assemble_bundle(
@@ -662,6 +729,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, TypeError, ValueError) as exc:
         print(f"error: {exc}")
         return 2
+
     for path in outputs:
         print(f"created: {path}")
     return 0
