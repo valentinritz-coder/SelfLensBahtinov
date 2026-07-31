@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import pytest
-
 from selflensbahtinov.models import (
     GratingRegion,
     MaskGeometry,
@@ -83,16 +81,15 @@ def test_topology_filter_is_independent_from_length_threshold(monkeypatch):
 
     import selflensbahtinov.slot_topology as topology
 
-    original = topology.is_valid_clipped_slot
     monkeypatch.setattr(
         topology,
         "is_valid_clipped_slot",
-        lambda candidate, **kwargs: candidate is not malformed and original(candidate, **kwargs),
+        lambda candidate, **kwargs: candidate is not malformed,
     )
     filtered = remove_malformed_slots(source)
 
     assert malformed not in filtered.slots
-    assert len(filtered.slots) < len(source.slots)
+    assert len(filtered.slots) == 3
     assert {candidate.region for candidate in filtered.slots} == {
         GratingRegion.LEFT_REFERENCE,
         GratingRegion.RIGHT_UPPER,
