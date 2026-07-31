@@ -10,6 +10,7 @@ from selflensbahtinov.openscad import (
     supports_format,
 )
 from selflensbahtinov.slot_topology import remove_malformed_slots
+from selflensbahtinov.slot_cleanup import remove_clipped_slot_slivers
 from selflensbahtinov.three_oclock_label import ThreeOClockLabelRenderer
 
 
@@ -46,7 +47,18 @@ def geometry_for(req: GenerationRequest, test_ring: bool = False):
             outer_face_fillet_radius_mm=req.outer_face_fillet_radius_mm,
         ),
     )
-    return remove_malformed_slots(geometry)
+    geometry = remove_malformed_slots(geometry)
+    if not test_ring:
+        minimum_length = (
+            req.minimum_clipped_slot_length_mm
+            if req.minimum_clipped_slot_length_mm is not None
+            else max(2 * geometry.slot_width_mm, 4.0)
+        )
+        geometry = remove_clipped_slot_slivers(
+            geometry,
+            minimum_length_mm=minimum_length,
+        )
+    return geometry
 
 
 def _write_formats(req, base: Path, scad: str) -> list[Path]:
